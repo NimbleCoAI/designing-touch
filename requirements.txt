@@ -1,0 +1,11 @@
+# Runtime deps for the displacement experiments.
+# Pinned loosely; tested on Python 3.9 / Apple Silicon (Metal-backed GL 4.1).
+numpy>=2.0
+opencv-python>=4.10
+moderngl>=5.12
+Pillow>=10.0
+imageio>=2.34
+imageio-ffmpeg>=0.5   # bundles an ffmpeg binary so no system ffmpeg is needed
+
+# dev / test
+pytest>=8.0

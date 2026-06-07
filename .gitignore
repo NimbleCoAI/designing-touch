@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# render outputs (large/binary); sample renders live in docs/ instead
+**/out/
+*.mp4
+!docs/**
