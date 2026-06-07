@@ -41,7 +41,8 @@ def main():
                     help="named look: abstract | portrait | textured | embers | aurora | <your saved>")
     ap.add_argument("--res", default="1920x1080")
     ap.add_argument("--grid", default="416x234")
-    ap.add_argument("--particles", type=int, default=120000)
+    ap.add_argument("--particles", type=int, default=200000,
+                    help="max particles allocated; the Count slider scales how many render")
     ap.add_argument("--list-cameras", action="store_true")
     ap.add_argument("--no-mirror", action="store_true")
     args = ap.parse_args()

@@ -85,6 +85,12 @@ class GlowRenderer:
         self.fade_vao = ctx.vertex_array(self.fade_prog, [(self.tri_vbo, "2f", "in_vert")])
         self.comp_vao = ctx.vertex_array(self.comp_prog, [(self.tri_vbo, "2f", "in_vert")])
 
+        self._make_targets(width, height)
+
+    def _make_targets(self, width, height):
+        ctx = self.ctx
+        self.w, self.h = width, height
+
         def hdr():
             t = ctx.texture((width, height), 4, dtype="f2")
             t.filter = (moderngl.LINEAR, moderngl.LINEAR)
@@ -93,8 +99,13 @@ class GlowRenderer:
         self.tex_b, self.fbo_b = hdr()
         self.out_tex = ctx.texture((width, height), 3)
         self.out_fbo = ctx.framebuffer(color_attachments=[self.out_tex])
-        self.fbo_a.use(); self.ctx.clear(0, 0, 0, 1)
-        self.fbo_b.use(); self.ctx.clear(0, 0, 0, 1)
+        self.p_prog["u_aspect"].value = width / height
+        self.fbo_a.use(); ctx.clear(0, 0, 0, 1)
+        self.fbo_b.use(); ctx.clear(0, 0, 0, 1)
+
+    def resize(self, width, height):
+        """Switch output resolution live (recreate size-dependent targets, keep the context)."""
+        self._make_targets(width, height)
 
     def render(self, instance_data: np.ndarray) -> np.ndarray:
         ctx = self.ctx
