@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: dtouch
+Version: 0.1.0
+Summary: Modular, CLI/agent-drivable engine for TouchDesigner-style video/audio effects
+Requires-Python: >=3.9
+Requires-Dist: numpy>=2.0
+Requires-Dist: opencv-python>=4.10
+Requires-Dist: moderngl>=5.12
+Requires-Dist: Pillow>=10.0
+Requires-Dist: imageio>=2.34
+Requires-Dist: imageio-ffmpeg>=0.5
+Provides-Extra: audio
+Requires-Dist: sounddevice>=0.4; extra == "audio"
+Provides-Extra: dev
+Requires-Dist: pytest>=8.0; extra == "dev"

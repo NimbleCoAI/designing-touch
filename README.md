@@ -1,35 +1,62 @@
 # designing-touch
 
 Experiments in recreating features of [TouchDesigner](https://derivative.ca/) — the node-based,
-real-time visual programming environment — in a form that can be **built, run, and iterated on by
-Claude Code**.
+real-time visual programming environment — as a **modular engine that can be built, run, and
+iterated on by Claude Code** from a terminal.
 
 ## Why
 
-TouchDesigner is a GUI-first tool: you wire operators (TOPs, CHOPs, SOPs, DATs) on a canvas to build
-real-time generative visuals, audio-reactive systems, and interactive installations. That GUI-first
-model is hard for an agent to drive. This repo explores the inverse: **express the same primitives as
-code** — composable, text-first, version-controlled — so an agent can author and evolve them.
+TouchDesigner is GUI-first: you wire operators (TOPs, CHOPs, SOPs) on a canvas. That's hard for
+an agent to drive. This repo inverts it: **express the same primitives as code** — composable,
+text-first, version-controlled, and headless — so an agent can author effects, render them, and
+*verify the result itself* without a display or device permissions.
 
-## Goal
+That last property is the whole point. See **[docs/autonomy-pattern.md](docs/autonomy-pattern.md)**
+for the self-verifying loop the repo is built around.
 
-Pick individual TouchDesigner capabilities and rebuild them as small, self-contained experiments:
+## The engine: `dtouch/`
 
-- **Operator model** — a node graph of typed operators (texture / channel / geometry / data) with
-  a pull-based evaluation model.
-- **Real-time rendering** — GLSL/WebGL pipelines for procedural textures and feedback loops.
-- **Audio-reactive** — FFT/CHOP-style signal processing driving visual parameters.
-- **Procedural geometry** — SOP-style geometry generation and instancing.
+A small Python package of GPU/NumPy operators plus a node-graph-as-code spine:
 
-Each experiment stands alone, documents what TD feature it targets, and how close it gets.
+| Module             | Role (TouchDesigner analog)                                   |
+|--------------------|---------------------------------------------------------------|
+| `dtouch.sources`   | TOP — synthetic / image / webcam / video luminance sources    |
+| `dtouch.field`     | TOP→POP — grid, luminance displacement, seeded randoms, packing |
+| `dtouch.render`    | Copy SOP + Light + Camera — headless instanced GPU renderer    |
+| `dtouch.audio`     | CHOP — audio file/mic → amplitude + frequency bands            |
+| `dtouch.fluid`     | GPU stable-fluids velocity field (advection)                   |
+| `dtouch.pipeline`  | `Op` / `Graph` — wire operators by threading a context dict    |
 
-## Structure
+## Experiments
 
+| #  | Experiment        | TouchDesigner feature ported                          |
+|----|-------------------|-------------------------------------------------------|
+| 01 | displacement      | TOP→POP, displace by luminance, instanced boxes, light/depth |
+| 02 | shadows           | + depth-from-light shadow map                          |
+| 03 | audio-reactive    | CHOP → modulate displacement/scale by sound            |
+| 04 | fluid             | stable-fluids advection of the particle field          |
+
+Each `experiments/NN-name/` has its own README and a `run.py` CLI; a sample frame is committed
+under `docs/`.
+
+## Quickstart
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e .                      # installs the dtouch engine + deps
+
+cd experiments/01-displacement
+python run.py --frames 90             # synthetic source, no camera needed
+python run.py --source webcam         # live (grant terminal Camera permission first)
 ```
-experiments/   # one directory per experiment, self-contained
-docs/          # notes on TouchDesigner concepts being recreated
+
+Outputs land in each experiment's `out/` (`*.mp4` + `*_frame0.png`).
+
+## Tests
+
+```bash
+pytest tests/ -q          # engine: deterministic transforms + graph + render smoke test
 ```
 
-## Status
-
-Early. No experiments yet — scaffolding only.
+Verified on Apple Silicon (M4 Max, Metal-backed GL 4.1). Requires a GPU/GL context for the
+render smoke test.
