@@ -33,6 +33,8 @@ def main():
                     help="'builtin' (laptop cam), an index, or a name substring")
     ap.add_argument("--matte", default="auto",
                     choices=["auto", "motion", "saliency", "person", "edges", "luma"])
+    ap.add_argument("--preset", default=None,
+                    help="named look: abstract | portrait | textured | embers | aurora | <your saved>")
     ap.add_argument("--res", default="1280x720")
     ap.add_argument("--grid", default="256x144")
     ap.add_argument("--particles", type=int, default=45000)
@@ -52,7 +54,8 @@ def main():
     device = int(args.device) if args.device.isdigit() else args.device
     if args.mode == "flow":
         live_flow(device=device, matte=args.matte, res=parse_wh(args.res),
-                  grid=parse_wh(args.grid), n=args.particles, mirror=not args.no_mirror)
+                  grid=parse_wh(args.grid), n=args.particles, preset=args.preset,
+                  mirror=not args.no_mirror)
     else:
         live(device=device, res=parse_wh(args.res), mirror=not args.no_mirror)
 

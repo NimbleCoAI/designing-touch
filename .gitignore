@@ -8,3 +8,5 @@ __pycache__/
 *.mp4
 !docs/**
 dtouch/assets/*.tflite
+presets.json
+**/presets.json

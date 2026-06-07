@@ -29,6 +29,7 @@ from .camera import open_camera
 from .matte import make_matte
 from .particles import ParticleFlow
 from .glow import GlowRenderer
+from . import presets as _presets
 
 
 def _open_capture(device):
@@ -42,7 +43,7 @@ _MATTE_CYCLE = ["auto", "motion", "saliency", "person", "edges"]
 
 def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
               n=45000, fade=0.90, exposure=1.4, mirror=True, seed=1,
-              show=True, max_frames=None):
+              preset=None, show=True, max_frames=None):
     """Real-time: camera -> subject-agnostic matte -> flowing particle cloud (glow).
 
     `show=False`/`max_frames=N` is the headless smoke mode used to verify before launching.
@@ -57,6 +58,28 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
     mat = make_matte(matte_kind)
     pf = ParticleFlow(n=n, gw=gw, gh=gh, seed=seed)
     glow = GlowRenderer(rw, rh, n, fade=fade, exposure=exposure)
+
+    all_presets = _presets.load()
+    preset_names = list(all_presets.keys())
+
+    def apply_preset(name):
+        nonlocal matte_kind, mat
+        cfg = all_presets.get(name)
+        if not cfg:
+            return
+        if cfg.get("matte") and cfg["matte"] != matte_kind:
+            matte_kind = cfg["matte"]; mat = make_matte(matte_kind)
+        if "palette" in cfg: pf.palette = cfg["palette"]
+        if "spark" in cfg: pf.spark = cfg["spark"]
+        if "curl_amp" in cfg: pf.curl_amp = cfg["curl_amp"]
+        if "reseed_frac" in cfg: pf.reseed_frac = cfg["reseed_frac"]
+        if "base_size" in cfg: pf.base_size = cfg["base_size"]
+        if "fade" in cfg: glow.fade = cfg["fade"]
+        if "exposure" in cfg: glow.exposure = cfg["exposure"]
+
+    cur_preset = preset if preset in all_presets else None
+    if cur_preset:
+        apply_preset(cur_preset)
 
     win = "dtouch — flow"
     if show:
@@ -85,7 +108,8 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
             m = cv2.resize(mat.compute(small), (gw, gh))
             gray = cv2.resize(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0,
                               (gw, gh))
-            pf.update(m, gray)
+            color = cv2.cvtColor(cv2.resize(small, (gw, gh)), cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+            pf.update(m, gray, color)
             out = glow.render(pf.render_data())
             if writer is not None:
                 writer.append_data(out)
@@ -96,11 +120,12 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
                 now = time.time(); fps = 10.0 / (now - t0); t0 = now
 
             if show:
-                cv2.putText(bgr, f"{fps:4.1f}fps  matte={matte_kind}  color={pf.palette}  "
-                                 f"cam={cam_name[:16]}  fade={glow.fade:.2f}",
+                cv2.putText(bgr, f"{fps:4.1f}fps  preset={cur_preset or '-'}  matte={matte_kind}  "
+                                 f"color={pf.palette}  cam={cam_name[:14]}",
                             (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (90, 220, 120), 1, cv2.LINE_AA)
-                cv2.putText(bgr, "q quit  n matte  c color  m mirror  [ ] trail  -/= glow  r REC  space freeze",
-                            (12, rh - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (80, 180, 110), 1,
+                cv2.putText(bgr, "q quit  p preset  o save  n matte  c color  m mirror  "
+                                 "[ ] trail  -/= glow  r REC  space freeze",
+                            (12, rh - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (80, 180, 110), 1,
                             cv2.LINE_AA)
                 if writer is not None:
                     cv2.circle(bgr, (rw - 24, 24), 8, (60, 60, 235), -1)
@@ -115,6 +140,19 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
                     mat = make_matte(matte_kind)
                 elif key == ord('c'):
                     pf.cycle_palette()
+                elif key == ord('p'):
+                    if preset_names:
+                        i = (preset_names.index(cur_preset) + 1) % len(preset_names) \
+                            if cur_preset in preset_names else 0
+                        cur_preset = preset_names[i]; apply_preset(cur_preset)
+                elif key == ord('o'):
+                    name = "mine_%s" % time.strftime("%H%M%S")
+                    cfg = dict(matte=matte_kind, palette=pf.palette, fade=glow.fade,
+                               exposure=glow.exposure, spark=pf.spark, curl_amp=pf.curl_amp,
+                               reseed_frac=pf.reseed_frac, base_size=pf.base_size)
+                    path = _presets.save(name, cfg)
+                    all_presets[name] = cfg; preset_names.append(name); cur_preset = name
+                    print("saved preset", name, "->", path)
                 elif key == ord('m'):
                     mirror = not mirror
                 elif key == ord('['):

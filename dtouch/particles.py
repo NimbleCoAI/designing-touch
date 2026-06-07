@@ -13,7 +13,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
-PALETTES = ["ice", "rainbow", "fire", "aurora", "mono"]
+PALETTES = ["ice", "video", "rainbow", "fire", "aurora", "mono"]
 
 
 def _hsv2rgb(h, s, v):
@@ -43,7 +43,7 @@ class ParticleFlow:
     def __init__(self, n=40000, gw=256, gh=144, seed=0, tint=(0.45, 0.72, 1.0),
                  K=0.20, attract_speed=4.5, drift_inside=0.15, pull_falloff=22.0,
                  flow_gain=0.6, curl_amp=0.5, damp=0.90, reseed_sdf=-22.0,
-                 reseed_frac=0.06, base_size=0.011, speed_ref=4.0):
+                 reseed_frac=0.06, base_size=0.011, speed_ref=4.0, spark=0.35):
         self.n, self.gw, self.gh = n, gw, gh
         rng = np.random.default_rng(seed)
         self.px = rng.uniform(0, gw, n).astype(np.float32)
@@ -56,17 +56,20 @@ class ParticleFlow:
         self.pull_falloff, self.flow_gain, self.curl_amp = pull_falloff, flow_gain, curl_amp
         self.damp, self.reseed_sdf, self.reseed_frac = damp, reseed_sdf, reseed_frac
         self.base_size, self.speed_ref = base_size, speed_ref
+        self.spark = spark
         self.palette = "ice"
         self._rng = rng
         self._prev_gray = None
         self._z = np.zeros(n, np.float32)
+        self._vcol = np.ones((n, 3), np.float32)   # per-particle source-video color
         # static curl field (divergence-free swirl) for organic drift
         pot = cv2.GaussianBlur(rng.standard_normal((gh, gw)).astype(np.float32), (0, 0), 9.0)
         cy, cx = np.gradient(pot)
         self._curl_x, self._curl_y = cy, -cx
 
-    def update(self, matte, gray):
-        """matte, gray: float32 (gh, gw). Advances the particle field one frame."""
+    def update(self, matte, gray, color=None):
+        """matte, gray: float32 (gh, gw). color: optional (gh, gw, 3) RGB in [0,1] for the
+        'video' palette (particles painted with the real footage -> recognizable subject)."""
         gw, gh = self.gw, self.gh
         mbin = (matte > 0.35).astype(np.uint8)
         if mbin.any():
@@ -112,6 +115,12 @@ class ParticleFlow:
         # flow carries motion; curl gives organic drift everywhere (life inside the shape)
         self.vx += self.flow_gain * fwx + self.curl_amp * cnx
         self.vy += self.flow_gain * fwy + self.curl_amp * cny
+        # motion-spark: fast local motion scatters particles into energetic sparks
+        if self.spark > 0:
+            fmag = np.hypot(fwx, fwy)
+            kick = self.spark * fmag
+            self.vx += self._rng.standard_normal(self.n).astype(np.float32) * kick
+            self.vy += self._rng.standard_normal(self.n).astype(np.float32) * kick
         self.vx *= self.damp
         self.vy *= self.damp
         self.px += self.vx
@@ -133,6 +142,11 @@ class ParticleFlow:
             self.vy[recycle] = _bilinear(flow_y, rx, ry, gw, gh) * self.flow_gain
 
         self._z = _bilinear(z_grid, self.px, self.py, gw, gh).astype(np.float32)
+        if color is not None:
+            cx = np.clip(self.px, 0, gw - 1.001); cy = np.clip(self.py, 0, gh - 1.001)
+            self._vcol = np.stack([_bilinear(color[..., 0], cx, cy, gw, gh),
+                                   _bilinear(color[..., 1], cx, cy, gw, gh),
+                                   _bilinear(color[..., 2], cx, cy, gw, gh)], axis=1).astype(np.float32)
 
     def _sample_matte(self, matte, k):
         w = matte.ravel().astype(np.float64)
@@ -154,7 +168,10 @@ class ParticleFlow:
         speed = np.hypot(self.vx, self.vy)
         sp = np.clip(speed / self.speed_ref, 0.0, 1.0)
         z = self._z
-        bright = (0.30 + 0.70 * sp) * (0.45 + 0.55 * z)
+        if self.palette == "video":
+            bright = 0.75 + 0.25 * z          # let the footage's own colors carry luminance
+        else:
+            bright = (0.30 + 0.70 * sp) * (0.45 + 0.55 * z)
         size = self.base_size * (0.7 + 1.0 * z)
         col = self._colorize(sp, z)
         out = np.empty((self.n, 7), np.float32)
@@ -164,6 +181,8 @@ class ParticleFlow:
 
     def _colorize(self, sp, z):
         n = self.n
+        if self.palette == "video":
+            return self._vcol
         if self.palette == "mono":
             return np.ones((n, 3), np.float32)
         if self.palette == "rainbow":
