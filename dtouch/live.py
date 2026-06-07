@@ -153,13 +153,15 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
                               (gw, gh))
             color = cv2.cvtColor(cv2.resize(small, (gw, gh)), cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
 
-            # base look from the panel; audio modulates glow/spark on top for this frame
+            # base look from the panel; audio modulates glow/spark on top for this frame.
+            # Spark is modulated MULTIPLICATIVELY off the slider, so when Spark is 0 (e.g. sigil)
+            # sound adds no spark/blur — it only pulses brightness with the bass.
             glow.exposure = ui.exposure if ui is not None else glow.exposure
             pf.spark = ui.spark if ui is not None else pf.spark
             if mic is not None and mic.available:
                 lv = mic.levels(); sens = ui.sens if ui is not None else 1.0
                 glow.exposure = glow.exposure * (1.0 + 1.6 * sens * lv["bass"])
-                pf.spark = pf.spark + 1.2 * sens * lv["treble"]
+                pf.spark = pf.spark * (1.0 + 2.0 * sens * lv["treble"])
 
             # video palette = textured/recognizable: weight particle density by the footage's
             # luminance inside the subject so the face's tones resolve as a pointillist portrait.
