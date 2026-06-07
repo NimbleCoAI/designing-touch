@@ -1,57 +1,51 @@
 """In-frame control panel — a collapsible sidebar drawn onto the render, one window.
 
-cv2 highgui can't host a real side menu, and Tk won't paint when launched headless on macOS.
-So this is an immediate-mode GUI drawn directly onto the rendered frame with cv2 primitives,
-with mouse hit-testing via setMouseCallback. It lives in the same window as the video, collapses
-to a small button, and because it's just drawn pixels it can be rendered headless and inspected.
-
-The panel owns the tunable values (fade, exposure, spark, curl, dot, mirror, audio, sens,
-record) and the selected preset/matte/palette; the live loop reads them each frame and applies.
-Preset clicks set `pending_preset` for the loop to apply (it touches the engine), then the loop
-calls `sync_from` to reflect the applied values back into the sliders.
+Immediate-mode GUI drawn with cv2 primitives (Tk won't paint when launched headless on macOS;
+cv2 windows do). Everything is a drawn, boxed, hover-highlighting control with click feedback,
+and aligned hit-testing via setMouseCallback. Because it's just pixels, it can be rendered
+headless and inspected. ASCII glyphs only — cv2's font can't render •/■/≡/— (they show as ???).
 """
 from __future__ import annotations
 
 import cv2
-import numpy as np
 
-BG = (24, 22, 20)
 PANEL = (34, 32, 30)
-INK = (210, 220, 215)
+BTN = (54, 52, 50)
+HOVER = (82, 86, 82)
+INK = (215, 222, 218)
 DIM = (140, 150, 145)
 ACC = (120, 215, 140)
 TRACK = (70, 74, 72)
-HANDLE = (150, 220, 165)
+HANDLE = (160, 230, 175)
 RED = (70, 70, 235)
+DARK = (20, 22, 20)
+
+
+def _in(rect, p):
+    x0, y0, x1, y1 = rect
+    return x0 <= p[0] <= x1 and y0 <= p[1] <= y1
 
 
 class OverlayUI:
     def __init__(self, w, h, presets, palettes, mattes,
                  preset="abstract", matte="auto", palette="ice"):
         self.w, self.h = w, h
-        self.presets = presets
-        self.palettes = palettes
-        self.mattes = mattes
+        self.presets, self.palettes, self.mattes = presets, palettes, mattes
         self.preset_idx = presets.index(preset) if preset in presets else 0
         self.matte_idx = mattes.index(matte) if matte in mattes else 0
         self.palette_idx = palettes.index(palette) if palette in palettes else 0
-        self.fade = 0.90
-        self.exposure = 1.4
-        self.spark = 0.35
-        self.curl = 0.5
-        self.dot = 0.011
-        self.mirror = True
-        self.audio = False
-        self.sens = 1.0
-        self.record = False
+        self.fade, self.exposure, self.spark, self.curl, self.dot = 0.90, 1.4, 0.35, 0.5, 0.011
+        self.mirror, self.audio, self.sens, self.record = True, False, 1.0, False
         self.open = True
         self.pending_preset = None
         self.pending_save = False
-        self.panel_w = 280
+        self.panel_w = 290
+        self.mouse = (-1, -1)
         self._hot = []
-        self._drag = None  # (attr, x0, x1, lo, hi)
+        self._drag = None
+        self._flash = 0
+        self._flash_rect = None
 
-    # ----- public values -----
     @property
     def matte_name(self): return self.mattes[self.matte_idx]
     @property
@@ -60,100 +54,110 @@ class OverlayUI:
     def preset_name(self): return self.presets[self.preset_idx]
 
     def sync_from(self, fade, exposure, spark, curl, dot, matte, palette):
-        """Reflect engine state back into the panel (after a preset is applied)."""
         self.fade, self.exposure, self.spark, self.curl, self.dot = fade, exposure, spark, curl, dot
         if matte in self.mattes: self.matte_idx = self.mattes.index(matte)
         if palette in self.palettes: self.palette_idx = self.palettes.index(palette)
 
-    # ----- drawing -----
+    # ----- primitives -----
     def _text(self, img, s, x, y, color=INK, scale=0.46, thick=1):
         cv2.putText(img, s, (x, y), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thick, cv2.LINE_AA)
 
-    def _slider(self, img, label, attr, x, y, w, lo, hi):
+    def _box(self, img, rect, fill, border=TRACK):
+        x0, y0, x1, y1 = rect
+        cv2.rectangle(img, (x0, y0), (x1, y1), fill, -1)
+        cv2.rectangle(img, (x0, y0), (x1, y1), border, 1, cv2.LINE_AA)
+
+    def _row(self, img, label, key, x, y, w, h=24, active=False, payload=None):
+        rect = (x, y, x + w, y + h)
+        hovered = _in(rect, self.mouse)
+        fill = ACC if active else (HOVER if hovered else BTN)
+        self._box(img, rect, fill)
+        self._text(img, label, x + 10, y + h - 8, DARK if active else INK, 0.46)
+        self._hot.append(((x, y, x + w, y + h), key, payload))
+        return rect
+
+    def _slider(self, img, label, attr, x, y, w):
+        lo, hi = _RANGES[attr]
         val = getattr(self, attr)
-        self._text(img, label, x, y - 6, DIM, 0.42)
-        tx0, tx1 = x, x + w
-        cv2.line(img, (tx0, y + 8), (tx1, y + 8), TRACK, 3, cv2.LINE_AA)
-        hx = int(tx0 + (val - lo) / (hi - lo) * w)
-        cv2.circle(img, (hx, y + 8), 6, HANDLE, -1, cv2.LINE_AA)
-        self._text(img, f"{val:.2f}", tx1 - 30, y - 6, DIM, 0.4)
-        self._hot.append(((tx0 - 6, y - 2, tx1 + 6, y + 18), "slider", (attr, tx0, tx1, lo, hi)))
+        rect = (x, y, x + w, y + 26)
+        hovered = _in(rect, self.mouse)
+        self._box(img, rect, HOVER if hovered else BTN)
+        self._text(img, label, x + 8, y + 17, DIM, 0.42)
+        tx0, tx1 = x + 90, x + w - 44
+        cv2.line(img, (tx0, y + 13), (tx1, y + 13), TRACK, 3, cv2.LINE_AA)
+        hx = int(tx0 + (val - lo) / (hi - lo) * (tx1 - tx0))
+        cv2.circle(img, (hx, y + 13), 6, HANDLE, -1, cv2.LINE_AA)
+        self._text(img, f"{val:.2f}", x + w - 38, y + 17, INK, 0.42)
+        self._hot.append(((tx0 - 8, y, tx1 + 8, y + 26), "slider", (attr, tx0, tx1, lo, hi)))
         return y + 30
 
     def _cycle(self, img, label, value, key, x, y, w):
-        self._text(img, label, x, y, DIM, 0.42)
-        self._text(img, f"< {value} >", x + 70, y, INK, 0.46)
-        self._hot.append(((x + 60, y - 14, x + 86, y + 6), "cycle", (key, -1)))
-        self._hot.append(((x + w - 26, y - 14, x + w, y + 6), "cycle", (key, +1)))
-        return y + 26
+        self._text(img, label, x, y + 10, DIM, 0.42)
+        ry = y + 16
+        lb = (x, ry, x + 28, ry + 24)
+        rb = (x + w - 28, ry, x + w, ry + 24)
+        self._box(img, lb, HOVER if _in(lb, self.mouse) else BTN)
+        self._box(img, rb, HOVER if _in(rb, self.mouse) else BTN)
+        self._text(img, "<", x + 9, ry + 17, INK, 0.5, 2)
+        self._text(img, ">", x + w - 19, ry + 17, INK, 0.5, 2)
+        self._text(img, str(value), x + 40, ry + 17, ACC, 0.5)
+        self._hot.append((lb, "cycle", (key, -1)))
+        self._hot.append((rb, "cycle", (key, +1)))
+        return ry + 32
 
-    def _button(self, img, label, key, x, y, w, active=False):
-        col = ACC if active else PANEL
-        cv2.rectangle(img, (x, y - 16), (x + w, y + 8), col, -1)
-        cv2.rectangle(img, (x, y - 16), (x + w, y + 8), TRACK, 1)
-        self._text(img, label, x + 8, y, (20, 20, 20) if active else INK, 0.44)
-        self._hot.append(((x, y - 16, x + w, y + 8), "button", key))
-        return y + 32
-
+    # ----- layout -----
     def draw(self, frame, info):
         self._hot = []
         h, w = frame.shape[:2]
         if not self.open:
-            # collapsed: a small hamburger button top-right
-            cv2.rectangle(frame, (w - 46, 12), (w - 12, 40), PANEL, -1)
-            for yy in (20, 26, 32):
-                cv2.line(frame, (w - 40, yy), (w - 18, yy), INK, 2, cv2.LINE_AA)
-            self._hot.append(((w - 46, 12, w - 12, 40), "collapse", None))
+            r = (w - 48, 12, w - 12, 42)
+            self._box(frame, r, HOVER if _in(r, self.mouse) else PANEL)
+            for yy in (21, 27, 33):
+                cv2.line(frame, (w - 40, yy), (w - 20, yy), INK, 2, cv2.LINE_AA)
+            self._hot.append((r, "collapse", None))
             self._draw_status(frame, info)
             return frame
 
         px = w - self.panel_w
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (px, 0), (w, h), PANEL, -1)
-        cv2.addWeighted(overlay, 0.82, frame, 0.18, 0, frame)
-        x = px + 16
-        cw = self.panel_w - 32
-        y = 30
-        self._text(frame, "dtouch", x, y, ACC, 0.6, 2)
-        # collapse arrow (click to fold the panel away)
-        cv2.rectangle(frame, (w - 34, 14), (w - 14, 34), TRACK, -1)
-        self._text(frame, ">", w - 30, 30, INK, 0.6, 2)
-        self._hot.append(((w - 40, 12, w - 12, 36), "collapse", None))
-        y += 18
+        ov = frame.copy()
+        cv2.rectangle(ov, (px, 0), (w, h), PANEL, -1)
+        cv2.addWeighted(ov, 0.86, frame, 0.14, 0, frame)
+        x, cw, y = px + 16, self.panel_w - 32, 30
+        self._text(frame, "dtouch", x, y, ACC, 0.62, 2)
+        cr = (w - 40, 12, w - 12, 36)
+        self._box(frame, cr, HOVER if _in(cr, self.mouse) else BTN)
+        self._text(frame, ">", w - 33, 30, INK, 0.55, 2)
+        self._hot.append((cr, "collapse", None))
+        y += 16
 
-        self._text(frame, "TEMPLATES", x, y, DIM, 0.4); y += 16
+        self._text(frame, "TEMPLATES", x, y, DIM, 0.4); y += 8
         for i, name in enumerate(self.presets):
-            active = (i == self.preset_idx)
-            self._text(frame, ("• " if active else "  ") + name, x, y,
-                       ACC if active else INK, 0.46)
-            self._hot.append(((x, y - 12, px + self.panel_w - 16, y + 6), "preset", i))
-            y += 20
-        y = self._button(frame, "Save current look", "save", x, y + 4, cw)
+            self._row(frame, name, "preset", x, y, cw, active=(i == self.preset_idx), payload=i)
+            y += 28
+        self._row(frame, "+ Save current look", "save", x, y, cw); y += 34
 
-        self._text(frame, "SOURCE", x, y, DIM, 0.4); y += 18
-        y = self._cycle(frame, "matte", self.matte_name, "matte", x, y, cw)
+        self._text(frame, "SOURCE", x, y, DIM, 0.4); y += 6
+        y = self._cycle(frame, "matte", self.matte_name, "matte", x, y, cw) + 6
+
+        self._text(frame, "LOOK", x, y, DIM, 0.4); y += 6
+        y = self._cycle(frame, "color", self.palette_name, "color", x, y, cw) + 4
+        for label, attr in (("Trails", "fade"), ("Glow", "exposure"), ("Spark", "spark"),
+                            ("Flow", "curl"), ("Dot", "dot")):
+            y = self._slider(frame, label, attr, x, y, cw)
+
         y += 4
+        self._row(frame, "Sound react: " + ("ON" if self.audio else "off"),
+                  "audio", x, y, cw, active=self.audio); y += 28
+        y = self._slider(frame, "Sens", "sens", x, y, cw) + 4
+        self._row(frame, ("Stop recording" if self.record else "Record"),
+                  "record", x, y, cw, active=self.record); y += 28
+        self._row(frame, "Mirror: " + ("on" if self.mirror else "off"),
+                  "mirror", x, y, cw, active=self.mirror)
 
-        self._text(frame, "LOOK", x, y, DIM, 0.4); y += 18
-        y = self._cycle(frame, "color", self.palette_name, "color", x, y, cw)
-        y += 6
-        y = self._slider(frame, "Trails", "fade", x, y, cw, 0.50, 0.985)
-        y = self._slider(frame, "Glow", "exposure", x, y, cw, 0.3, 4.0)
-        y = self._slider(frame, "Spark", "spark", x, y, cw, 0.0, 1.0)
-        y = self._slider(frame, "Flow", "curl", x, y, cw, 0.0, 1.0)
-        y = self._slider(frame, "Dot size", "dot", x, y, cw, 0.004, 0.020)
-
-        self._text(frame, "AUDIO", x, y, DIM, 0.4); y += 16
-        y = self._button(frame, "React to sound: " + ("ON" if self.audio else "off"),
-                         "audio", x, y, cw, active=self.audio)
-        y = self._slider(frame, "Sensitivity", "sens", x, y, cw, 0.0, 3.0)
-
-        y += 6
-        y = self._button(frame, ("■ Stop recording" if self.record else "● Record"),
-                         "record", x, y, cw, active=self.record)
-        y = self._button(frame, "Mirror: " + ("on" if self.mirror else "off"),
-                         "mirror", x, y, cw, active=self.mirror)
-
+        # click feedback: flash the last-clicked control
+        if self._flash > 0 and self._flash_rect is not None:
+            self._box(frame, self._flash_rect, BTN, border=(255, 255, 255))
+            self._flash -= 1
         self._draw_status(frame, info)
         return frame
 
@@ -161,19 +165,21 @@ class OverlayUI:
         self._text(frame, info.get("status", ""), 12, 24, ACC, 0.5)
         if info.get("black"):
             h, w = frame.shape[:2]
-            self._text(frame, "CAMERA IS BLACK — disable iPhone Continuity Camera",
+            self._text(frame, "CAMERA IS BLACK - disable iPhone Continuity Camera",
                        12, h // 2, RED, 0.8, 2)
             self._text(frame, "iPhone: Settings > General > AirPlay & Handoff > Continuity Camera > Off",
                        12, h // 2 + 28, (140, 140, 240), 0.5)
         if self.record:
             h, w = frame.shape[:2]
-            cv2.circle(frame, (w - (self.panel_w + 24 if self.open else 70), 24), 7, RED, -1)
+            cv2.circle(frame, (w - (self.panel_w + 22 if self.open else 70), 24), 7, RED, -1)
 
     # ----- mouse -----
     def on_mouse(self, event, x, y, flags, param=None):
+        self.mouse = (x, y)
         if event == cv2.EVENT_LBUTTONDOWN:
-            for (x0, y0, x1, y1), kind, payload in self._hot:
-                if x0 <= x <= x1 and y0 <= y <= y1:
+            for rect, kind, payload in self._hot:
+                if _in(rect, (x, y)):
+                    self._flash_rect, self._flash = rect, 4
                     self._activate(kind, payload, x)
                     return
         elif event == cv2.EVENT_MOUSEMOVE and (flags & cv2.EVENT_FLAG_LBUTTON) and self._drag:
@@ -200,8 +206,17 @@ class OverlayUI:
             self._drag = payload
             t = min(max((x - x0) / max(x1 - x0, 1), 0.0), 1.0)
             setattr(self, attr, lo + t * (hi - lo))
-        elif kind == "button":
-            if payload == "audio": self.audio = not self.audio
-            elif payload == "record": self.record = not self.record
-            elif payload == "mirror": self.mirror = not self.mirror
-            elif payload == "save": self.pending_save = True
+        elif kind == "audio":
+            self.audio = not self.audio
+        elif kind == "record":
+            self.record = not self.record
+        elif kind == "mirror":
+            self.mirror = not self.mirror
+        elif kind == "save":
+            self.pending_save = True
+
+
+_RANGES = {
+    "fade": (0.50, 0.985), "exposure": (0.3, 4.0), "spark": (0.0, 1.0),
+    "curl": (0.0, 1.0), "dot": (0.004, 0.020), "sens": (0.0, 3.0),
+}
