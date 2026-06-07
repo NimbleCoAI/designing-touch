@@ -25,6 +25,10 @@ A small Python package of GPU/NumPy operators plus a node-graph-as-code spine:
 | `dtouch.render`    | Copy SOP + Light + Camera — headless instanced GPU renderer    |
 | `dtouch.audio`     | CHOP — audio file/mic → amplitude + frequency bands            |
 | `dtouch.fluid`     | GPU stable-fluids velocity field (advection)                   |
+| `dtouch.matte`     | subject-agnostic interest field (motion / saliency / edges / person) |
+| `dtouch.particles` | flowing particle cloud that fills a matte (optical flow + curl) |
+| `dtouch.glow`      | additive glowing-particle renderer with trail feedback        |
+| `dtouch.camera`    | pick the built-in camera by name (macOS Continuity-safe)      |
 | `dtouch.pipeline`  | `Op` / `Graph` — wire operators by threading a context dict    |
 
 ## Experiments
@@ -35,7 +39,7 @@ A small Python package of GPU/NumPy operators plus a node-graph-as-code spine:
 | 02 | shadows           | + depth-from-light shadow map                          |
 | 03 | audio-reactive    | CHOP → modulate displacement/scale by sound            |
 | 04 | fluid             | stable-fluids advection of the particle field          |
-| 05 | live-webcam       | **real-time interactive** webcam → particle displacement in a window |
+| 05 | live-webcam       | **real-time interactive** camera → flowing glowing particle cloud of whatever's in frame |
 
 Each `experiments/NN-name/` has its own README and a `run.py` CLI; a sample frame is committed
 under `docs/`.
