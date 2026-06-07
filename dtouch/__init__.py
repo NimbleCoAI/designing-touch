@@ -10,11 +10,13 @@ from .sources import SyntheticSource, ImageSource, VideoSource, make_source
 from .render import Renderer
 from .shadow import ShadowRenderer
 from .audio import analyze_block, SyntheticAudio, WavAudio, make_audio
+from .fluid import Fluid2D, advect, project, divergence, bilinear
 from .pipeline import Op, Graph
 
 __all__ = [
     "make_grid", "displace_z", "random_scale", "random_euler", "pack_instances",
     "SyntheticSource", "ImageSource", "VideoSource", "make_source",
     "analyze_block", "SyntheticAudio", "WavAudio", "make_audio",
+    "Fluid2D", "advect", "project", "divergence", "bilinear",
     "Renderer", "ShadowRenderer", "Op", "Graph",
 ]

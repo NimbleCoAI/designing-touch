@@ -3,6 +3,7 @@ pyproject.toml
 dtouch/__init__.py
 dtouch/audio.py
 dtouch/field.py
+dtouch/fluid.py
 dtouch/pipeline.py
 dtouch/render.py
 dtouch/shadow.py
@@ -14,5 +15,6 @@ dtouch.egg-info/requires.txt
 dtouch.egg-info/top_level.txt
 tests/test_audio.py
 tests/test_field.py
+tests/test_fluid.py
 tests/test_graph.py
 tests/test_render.py
