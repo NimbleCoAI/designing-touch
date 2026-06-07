@@ -35,6 +35,7 @@ A small Python package of GPU/NumPy operators plus a node-graph-as-code spine:
 | 02 | shadows           | + depth-from-light shadow map                          |
 | 03 | audio-reactive    | CHOP → modulate displacement/scale by sound            |
 | 04 | fluid             | stable-fluids advection of the particle field          |
+| 05 | live-webcam       | **real-time interactive** webcam → particle displacement in a window |
 
 Each `experiments/NN-name/` has its own README and a `run.py` CLI; a sample frame is committed
 under `docs/`.
