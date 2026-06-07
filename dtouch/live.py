@@ -34,12 +34,12 @@ def _open_capture(device):
     return cv2.VideoCapture(device)
 
 
-def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(384, 216),
-              n=90000, mirror=True, seed=1, preset="abstract", audio=False,
+def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
+              n=120000, mirror=True, seed=1, preset="abstract", audio=False,
               panel=True, show=True, max_frames=None):
     rw, rh = res
     gw, gh = grid
-    mw, mh = 400, 225
+    mw, mh = 416, 234
 
     cap, cam_name = open_camera(device)
     matte_kind = matte

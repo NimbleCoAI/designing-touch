@@ -39,9 +39,9 @@ def main():
                     choices=["auto", "motion", "saliency", "person", "edges", "luma"])
     ap.add_argument("--preset", default=None,
                     help="named look: abstract | portrait | textured | embers | aurora | <your saved>")
-    ap.add_argument("--res", default="1280x720")
-    ap.add_argument("--grid", default="384x216")
-    ap.add_argument("--particles", type=int, default=90000)
+    ap.add_argument("--res", default="1920x1080")
+    ap.add_argument("--grid", default="416x234")
+    ap.add_argument("--particles", type=int, default=120000)
     ap.add_argument("--list-cameras", action="store_true")
     ap.add_argument("--no-mirror", action="store_true")
     args = ap.parse_args()
