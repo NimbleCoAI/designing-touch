@@ -150,8 +150,14 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(384, 216),
                 glow.exposure = glow.exposure * (1.0 + 1.6 * sens * lv["bass"])
                 pf.spark = pf.spark + 1.2 * sens * lv["treble"]
 
-            pf.update(m, gray, color)
-            out = glow.render(pf.render_data())
+            # video palette = textured/recognizable: weight particle density by the footage's
+            # luminance inside the subject so the face's tones resolve as a pointillist portrait.
+            density = m * np.clip((gray - 0.08) * 1.6, 0.03, 1.0) if pf.palette == "video" else None
+            pf.update(m, gray, color, density=density)
+            buf = pf.render_data()
+            if ui is not None and ui.count < 0.999:
+                buf = buf[: int(ui.count * n) * 7]   # live dot-count control
+            out = glow.render(buf)
             if writer is not None:
                 writer.append_data(out)
             bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)

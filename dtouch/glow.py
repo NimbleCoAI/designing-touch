@@ -98,7 +98,9 @@ class GlowRenderer:
 
     def render(self, instance_data: np.ndarray) -> np.ndarray:
         ctx = self.ctx
-        self.inst_vbo.write(instance_data.astype("f4").tobytes())
+        data = instance_data.astype("f4")
+        count = min(data.size // 7, self.n)   # allow rendering a subset (live dot-count control)
+        self.inst_vbo.write(data[:count * 7].tobytes())
 
         # 1) fade previous accumulation (tex_a) into fbo_b
         self.fbo_b.use()
@@ -113,7 +115,7 @@ class GlowRenderer:
         ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE)
         ctx.disable(moderngl.DEPTH_TEST)
         ctx.depth_mask = False
-        self.p_vao.render(moderngl.TRIANGLE_STRIP, vertices=4, instances=self.n)
+        self.p_vao.render(moderngl.TRIANGLE_STRIP, vertices=4, instances=count)
 
         # 3) tonemap to 8-bit output
         self.out_fbo.use()

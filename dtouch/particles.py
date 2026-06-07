@@ -67,10 +67,15 @@ class ParticleFlow:
         cy, cx = np.gradient(pot)
         self._curl_x, self._curl_y = cy, -cx
 
-    def update(self, matte, gray, color=None):
-        """matte, gray: float32 (gh, gw). color: optional (gh, gw, 3) RGB in [0,1] for the
-        'video' palette (particles painted with the real footage -> recognizable subject)."""
+    def update(self, matte, gray, color=None, density=None):
+        """matte, gray: float32 (gh, gw). color: optional (gh, gw, 3) RGB for the 'video'
+        palette. density: optional (gh, gw) reseed-weight map — particles concentrate where it
+        is high. When it follows the footage's luminance inside the subject, the face's tones
+        become particle density and the face resolves (pointillist portrait). Defaults to matte.
+        """
         gw, gh = self.gw, self.gh
+        if density is None:
+            density = matte
         mbin = (matte > 0.35).astype(np.uint8)
         if mbin.any():
             dt_in = cv2.distanceTransform(mbin, cv2.DIST_L2, 3)
@@ -138,7 +143,7 @@ class ParticleFlow:
         if recycle.size > budget:
             recycle = self._rng.choice(recycle, budget, replace=False)
         if recycle.size and mbin.any():
-            rx, ry = self._sample_matte(matte, recycle.size)
+            rx, ry = self._sample_matte(density, recycle.size)
             self.px[recycle] = rx; self.py[recycle] = ry
             self.vx[recycle] = _bilinear(flow_x, rx, ry, gw, gh) * self.flow_gain
             self.vy[recycle] = _bilinear(flow_y, rx, ry, gw, gh) * self.flow_gain
