@@ -1,6 +1,7 @@
 README.md
 pyproject.toml
 dtouch/__init__.py
+dtouch/audio.py
 dtouch/field.py
 dtouch/pipeline.py
 dtouch/render.py
@@ -11,6 +12,7 @@ dtouch.egg-info/SOURCES.txt
 dtouch.egg-info/dependency_links.txt
 dtouch.egg-info/requires.txt
 dtouch.egg-info/top_level.txt
+tests/test_audio.py
 tests/test_field.py
 tests/test_graph.py
 tests/test_render.py
