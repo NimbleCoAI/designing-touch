@@ -8,10 +8,11 @@ rendered frame without a display or device permissions.
 from .field import make_grid, displace_z, random_scale, random_euler, pack_instances
 from .sources import SyntheticSource, ImageSource, VideoSource, make_source
 from .render import Renderer
+from .shadow import ShadowRenderer
 from .pipeline import Op, Graph
 
 __all__ = [
     "make_grid", "displace_z", "random_scale", "random_euler", "pack_instances",
     "SyntheticSource", "ImageSource", "VideoSource", "make_source",
-    "Renderer", "Op", "Graph",
+    "Renderer", "ShadowRenderer", "Op", "Graph",
 ]

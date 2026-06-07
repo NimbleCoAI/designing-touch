@@ -4,6 +4,7 @@ dtouch/__init__.py
 dtouch/field.py
 dtouch/pipeline.py
 dtouch/render.py
+dtouch/shadow.py
 dtouch/sources.py
 dtouch.egg-info/PKG-INFO
 dtouch.egg-info/SOURCES.txt
