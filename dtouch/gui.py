@@ -68,7 +68,20 @@ class FlowGUI:
         self._build_ui()
         if preset in self.presets:
             self._apply_preset(preset)
-        self.root.after(30, self._step)
+        # size the window and force a first layout/paint BEFORE starting the heavy loop,
+        # otherwise the render loop can starve Tk's initial draw (blank window).
+        self.root.geometry(f"{self.display_w + 320}x{self.display_h + 70}")
+        self.root.update_idletasks()
+        self.root.after(300, self._step)
+        if os.environ.get("DTOUCH_SELFTEST"):
+            self.root.after(2500, self._selftest)
+
+    def _selftest(self):
+        v, s = self.video, self.sidebar
+        print("SELFTEST video mapped=%s %dx%d | sidebar mapped=%s %dx%d kids=%d | frames=%d"
+              % (v.winfo_ismapped(), v.winfo_width(), v.winfo_height(),
+                 s.winfo_ismapped(), s.winfo_width(), s.winfo_height(),
+                 len(s.winfo_children()), self._count), flush=True)
 
     # ---------- UI ----------
     def _section(self, parent, title, expanded=True):
@@ -116,7 +129,8 @@ class FlowGUI:
         ttk.Label(left, textvariable=self.fps_text).pack(anchor="w", pady=(4, 0))
 
         side = ttk.Frame(main, width=300)
-        side.pack(side="left", fill="y", padx=(10, 0))
+        side.pack(side="right", fill="y", padx=(10, 0))
+        self.sidebar = side
 
         # Templates
         s = self._section(side, "Templates")
@@ -259,7 +273,8 @@ class FlowGUI:
                     self._t0 = now
         except Exception as e:
             self.fps_text.set(f"err: {e}")
-        self.root.after(1, self._step)
+            print("STEP ERR:", e, flush=True)
+        self.root.after(15, self._step)
 
 
 def run_gui(device="builtin", res=(1100, 620), grid=(256, 144), n=45000, preset="abstract"):
