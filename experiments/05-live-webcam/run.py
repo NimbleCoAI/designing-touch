@@ -29,8 +29,10 @@ def parse_wh(s):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="flow", choices=["flow", "grid"])
-    ap.add_argument("--ui", default="gui", choices=["gui", "keys"],
-                    help="gui = control-panel window (default); keys = keyboard-only window")
+    ap.add_argument("--ui", default="panel", choices=["panel", "keys", "gui"],
+                    help="panel = render + slider window (default); keys = render only; "
+                         "gui = experimental Tk panel")
+    ap.add_argument("--audio", action="store_true", help="start with mic reactivity on")
     ap.add_argument("--device", default="builtin",
                     help="'builtin' (laptop cam), an index, or a name substring")
     ap.add_argument("--matte", default="auto",
@@ -54,16 +56,16 @@ def main():
         return
 
     device = int(args.device) if args.device.isdigit() else args.device
-    if args.mode == "flow" and args.ui == "gui":
+    if args.mode == "grid":
+        live(device=device, res=parse_wh(args.res), mirror=not args.no_mirror)
+    elif args.ui == "gui":
         from dtouch.gui import run_gui
         run_gui(device=device, res=parse_wh(args.res), grid=parse_wh(args.grid),
                 n=args.particles, preset=args.preset or "abstract")
-    elif args.mode == "flow":
-        live_flow(device=device, matte=args.matte, res=parse_wh(args.res),
-                  grid=parse_wh(args.grid), n=args.particles, preset=args.preset,
-                  mirror=not args.no_mirror)
     else:
-        live(device=device, res=parse_wh(args.res), mirror=not args.no_mirror)
+        live_flow(device=device, matte=args.matte, res=parse_wh(args.res),
+                  grid=parse_wh(args.grid), n=args.particles, preset=args.preset or "abstract",
+                  audio=args.audio, panel=(args.ui == "panel"), mirror=not args.no_mirror)
 
 
 if __name__ == "__main__":
