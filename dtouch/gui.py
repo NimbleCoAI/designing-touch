@@ -23,6 +23,7 @@ from .camera import open_camera, list_cameras
 from .matte import make_matte
 from .particles import ParticleFlow, PALETTES
 from .glow import GlowRenderer
+from .audio import LiveMic
 from . import presets as _presets
 
 MATTES = ["auto", "motion", "saliency", "person", "edges", "luma"]
@@ -58,6 +59,9 @@ class FlowGUI:
         self.dotsize = tk.DoubleVar(value=0.011)
         self.fps_text = tk.StringVar(value="")
 
+        self.mic = None
+        self.audio_on = tk.BooleanVar(value=False)
+        self.audio_sens = tk.DoubleVar(value=1.0)
         self.writer = None
         self.rec_path = None
         self._t0 = time.time()
@@ -167,6 +171,14 @@ class FlowGUI:
         self._slider(s, "Flow", self.curl, 0.0, 1.0)
         self._slider(s, "Dot size", self.dotsize, 0.004, 0.02)
 
+        # Audio
+        s = self._section(side, "Audio", expanded=True)
+        ttk.Checkbutton(s, text="React to sound (mic)", variable=self.audio_on,
+                        command=self._toggle_audio).pack(anchor="w", pady=2)
+        self._slider(s, "Sensitivity", self.audio_sens, 0.0, 3.0)
+        self.audio_label = ttk.Label(s, text="off")
+        self.audio_label.pack(anchor="w")
+
         # Record
         s = self._section(side, "Record", expanded=True)
         self.rec_btn = ttk.Button(s, text="● Start recording", command=self._toggle_record)
@@ -217,6 +229,19 @@ class FlowGUI:
         self.presets[name] = cfg
         self.preset_box.config(values=list(self.presets.keys()))
         self.var_preset.set(name)
+
+    def _toggle_audio(self):
+        if self.audio_on.get():
+            self.mic = LiveMic()
+            if self.mic.start():
+                self.audio_label.config(text="listening")
+            else:
+                self.audio_on.set(False)
+                self.audio_label.config(text="mic unavailable — grant Microphone permission")
+        else:
+            if self.mic is not None:
+                self.mic.stop()
+            self.audio_label.config(text="off")
 
     def _toggle_record(self):
         if self.writer is None:

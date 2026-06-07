@@ -106,3 +106,65 @@ def make_audio(kind: str, frames: int, fps: int = 30):
     if kind == "synthetic":
         return SyntheticAudio(frames, fps)
     return WavAudio(kind, frames, fps)
+
+
+class LiveMic:
+    """Real-time microphone levels for audio-reactive visuals.
+
+    Opens a sounddevice input stream; a callback computes EMA-smoothed amplitude + bass/mid/
+    treble with a slowly-decaying per-band auto-gain, so `levels()` returns ~[0,1] regardless of
+    input loudness. Degrades gracefully: if the mic can't open (no permission / no device),
+    `start()` returns False and `levels()` stays at zero — visuals just don't react.
+
+    Needs Microphone permission for the host terminal (macOS: System Settings > Privacy &
+    Security > Microphone).
+    """
+
+    def __init__(self, sr: int = 44100, block: int = 1024, smoothing: float = 0.35, device=None):
+        self.sr, self.block, self.alpha, self.device = sr, block, smoothing, device
+        self._levels = {"amp": 0.0, "bass": 0.0, "mid": 0.0, "treble": 0.0}
+        self._max = {"amp": 1e-6, "bass": 1e-6, "mid": 1e-6, "treble": 1e-6}
+        self._stream = None
+        self.available = False
+        self.error = None
+
+    def _bands(self, x):
+        x = np.asarray(x, dtype=np.float64)
+        mag = np.abs(np.fft.rfft(x * np.hanning(len(x))))
+        freqs = np.fft.rfftfreq(len(x), 1.0 / self.sr)
+        out = {"amp": float(np.sqrt(np.mean(x ** 2)))}
+        for name, (lo, hi) in BANDS.items():
+            sel = (freqs >= lo) & (freqs < hi)
+            out[name] = float(mag[sel].mean()) if sel.any() else 0.0
+        return out
+
+    def _callback(self, indata, frames, time_info, status):
+        vals = self._bands(indata[:, 0])
+        for k, v in vals.items():
+            self._levels[k] = (1 - self.alpha) * self._levels[k] + self.alpha * v
+            self._max[k] = max(self._max[k] * 0.999, self._levels[k])
+
+    def start(self) -> bool:
+        try:
+            import sounddevice as sd
+            self._stream = sd.InputStream(samplerate=self.sr, blocksize=self.block,
+                                          channels=1, device=self.device, callback=self._callback)
+            self._stream.start()
+            self.available = True
+        except Exception as e:
+            self.available = False
+            self.error = str(e)
+        return self.available
+
+    def levels(self) -> dict:
+        """Normalized levels in ~[0,1] (auto-gained per band)."""
+        return {k: min(self._levels[k] / (self._max[k] + 1e-9), 1.0) for k in self._levels}
+
+    def stop(self):
+        if self._stream is not None:
+            try:
+                self._stream.stop(); self._stream.close()
+            except Exception:
+                pass
+        self._stream = None
+        self.available = False

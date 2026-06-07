@@ -1,18 +1,9 @@
-"""Real-time live preview — webcam (or video) -> particle displacement, in a window.
+"""Real-time live preview — camera -> flowing particle cloud, in an OpenCV window.
 
-Reuses the offscreen GPU `Renderer`: each frame is captured, turned into a displaced
-instanced-cube render, and blitted to an OpenCV window. Interactive, ~30 fps at a modest grid.
-
-Controls (window focused):
-  q / ESC   quit
-  + / -     more / less displacement depth
-  [ / ]     smaller / larger dots
-  m         toggle mirror (selfie view)
-  i         invert (dark drives height instead of bright)
-  space     freeze / unfreeze the incoming video
-
-This is the interactive counterpart to the file-rendering experiments. It needs a display and
-(for webcam) camera permission, so it is deliberately separate from the headless engine.
+Uses the proven cv2 render window (which paints reliably on macOS) plus an on-window slider
+panel (cv2 trackbars) so everything is mouse-driven, not keyboard-only. Detects all-black
+camera frames (the classic symptom of iPhone Continuity Camera stealing the built-in) and says
+so on screen instead of showing a silent blank.
 """
 from __future__ import annotations
 
@@ -23,13 +14,14 @@ import cv2
 import numpy as np
 import imageio.v2 as imageio
 
-from .field import make_grid, displace_z, random_scale, random_euler, pack_instances
-from .render import Renderer
 from .camera import open_camera
 from .matte import make_matte
-from .particles import ParticleFlow
+from .particles import ParticleFlow, PALETTES
 from .glow import GlowRenderer
+from .audio import LiveMic
 from . import presets as _presets
+
+MATTES = ["auto", "motion", "saliency", "person", "edges", "luma"]
 
 
 def _open_capture(device):
@@ -38,27 +30,29 @@ def _open_capture(device):
     return cv2.VideoCapture(device)
 
 
-_MATTE_CYCLE = ["auto", "motion", "saliency", "person", "edges"]
+# ---- trackbar <-> value mappings (cv2 trackbars are integer, min 0) ----
+def _fade_from(p): return 0.50 + p / 100.0          # p 0..48  -> 0.50..0.98
+def _fade_to(v): return int(round((v - 0.50) * 100))
+def _exp_from(p): return 0.3 + p / 10.0             # p 0..37  -> 0.3..4.0
+def _exp_to(v): return int(round((v - 0.3) * 10))
+def _unit_from(p): return p / 100.0                 # p 0..100 -> 0..1
+def _unit_to(v): return int(round(v * 100))
+def _dot_from(p): return (4 + p) / 1000.0           # p 0..16  -> 0.004..0.020
+def _dot_to(v): return int(round(v * 1000 - 4))
 
 
 def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
-              n=45000, fade=0.90, exposure=1.4, mirror=True, seed=1,
-              preset=None, show=True, max_frames=None):
-    """Real-time: camera -> subject-agnostic matte -> flowing particle cloud (glow).
-
-    `show=False`/`max_frames=N` is the headless smoke mode used to verify before launching.
-    Returns (frames_processed, last_frame_or_None).
-    """
+              n=45000, mirror=True, seed=1, preset="abstract", audio=False,
+              panel=True, show=True, max_frames=None):
     rw, rh = res
     gw, gh = grid
-    mw, mh = 320, 180  # matte working resolution (cheap)
+    mw, mh = 320, 180
 
     cap, cam_name = open_camera(device)
     matte_kind = matte
     mat = make_matte(matte_kind)
     pf = ParticleFlow(n=n, gw=gw, gh=gh, seed=seed)
-    glow = GlowRenderer(rw, rh, n, fade=fade, exposure=exposure)
-
+    glow = GlowRenderer(rw, rh, n, fade=0.90, exposure=1.4)
     all_presets = _presets.load()
     preset_names = list(all_presets.keys())
 
@@ -77,40 +71,105 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
         if "fade" in cfg: glow.fade = cfg["fade"]
         if "exposure" in cfg: glow.exposure = cfg["exposure"]
 
-    cur_preset = preset if preset in all_presets else None
-    if cur_preset:
-        apply_preset(cur_preset)
+    if preset in all_presets:
+        apply_preset(preset)
 
     win = "dtouch — flow"
+    ctl = "dtouch — controls"
     if show:
         cv2.namedWindow(win, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(win, rw, rh)
+    if show and panel:
+        cv2.namedWindow(ctl, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(ctl, 420, 360)
+        cv2.createTrackbar("preset", ctl, preset_names.index(preset) if preset in preset_names else 0,
+                           len(preset_names) - 1, lambda v: None)
+        cv2.createTrackbar("matte", ctl, MATTES.index(matte_kind), len(MATTES) - 1, lambda v: None)
+        cv2.createTrackbar("color", ctl, PALETTES.index(pf.palette), len(PALETTES) - 1, lambda v: None)
+        cv2.createTrackbar("trails", ctl, _fade_to(glow.fade), 48, lambda v: None)
+        cv2.createTrackbar("glow", ctl, _exp_to(glow.exposure), 37, lambda v: None)
+        cv2.createTrackbar("spark", ctl, _unit_to(pf.spark), 100, lambda v: None)
+        cv2.createTrackbar("flow", ctl, _unit_to(pf.curl_amp), 100, lambda v: None)
+        cv2.createTrackbar("dot", ctl, _dot_to(pf.base_size), 16, lambda v: None)
+        cv2.createTrackbar("mirror", ctl, 1 if mirror else 0, 1, lambda v: None)
+        cv2.createTrackbar("audio", ctl, 1 if audio else 0, 1, lambda v: None)
+        cv2.createTrackbar("sensitivity", ctl, 10, 30, lambda v: None)
+        cv2.createTrackbar("record", ctl, 0, 1, lambda v: None)
 
-    frozen = False
-    last_small = None
-    t0 = time.time(); fps = 0.0; count = 0
-    out = None
+    def sync_panel():
+        if not (show and panel):
+            return
+        cv2.setTrackbarPos("matte", ctl, MATTES.index(matte_kind))
+        cv2.setTrackbarPos("color", ctl, PALETTES.index(pf.palette))
+        cv2.setTrackbarPos("trails", ctl, _fade_to(glow.fade))
+        cv2.setTrackbarPos("glow", ctl, _exp_to(glow.exposure))
+        cv2.setTrackbarPos("spark", ctl, _unit_to(pf.spark))
+        cv2.setTrackbarPos("flow", ctl, _unit_to(pf.curl_amp))
+        cv2.setTrackbarPos("dot", ctl, _dot_to(pf.base_size))
+
+    mic = None
+    if audio:
+        mic = LiveMic(); mic.start()
     writer = None; rec_path = None
     os.makedirs("out", exist_ok=True)
+
+    last_preset_pos = preset_names.index(preset) if preset in preset_names else 0
+    t0 = time.time(); fps = 0.0; count = 0
+    black_streak = 0
+    out = None
     try:
         while True:
-            if not frozen or last_small is None:
-                ok, frame = cap.read()
-                if not ok:
-                    if max_frames is None:
-                        continue
-                    break
-                if mirror:
-                    frame = cv2.flip(frame, 1)
-                last_small = cv2.resize(frame, (mw, mh))
-            small = last_small
+            ok, frame = cap.read()
+            if not ok:
+                if max_frames is None:
+                    continue
+                break
+            black_streak = black_streak + 1 if float(frame.mean()) < 3.0 else 0
 
+            if show and panel:
+                pp = cv2.getTrackbarPos("preset", ctl)
+                if pp != last_preset_pos:
+                    apply_preset(preset_names[pp]); sync_panel(); last_preset_pos = pp
+                mk = MATTES[cv2.getTrackbarPos("matte", ctl)]
+                if mk != matte_kind:
+                    matte_kind = mk; mat = make_matte(mk)
+                pf.palette = PALETTES[cv2.getTrackbarPos("color", ctl)]
+                glow.fade = _fade_from(cv2.getTrackbarPos("trails", ctl))
+                glow.exposure = _exp_from(cv2.getTrackbarPos("glow", ctl))
+                pf.spark = _unit_from(cv2.getTrackbarPos("spark", ctl))
+                pf.curl_amp = _unit_from(cv2.getTrackbarPos("flow", ctl))
+                pf.base_size = _dot_from(cv2.getTrackbarPos("dot", ctl))
+                mirror = bool(cv2.getTrackbarPos("mirror", ctl))
+                want_audio = bool(cv2.getTrackbarPos("audio", ctl))
+                if want_audio and mic is None:
+                    mic = LiveMic(); mic.start()
+                elif not want_audio and mic is not None:
+                    mic.stop(); mic = None
+                want_rec = bool(cv2.getTrackbarPos("record", ctl))
+                if want_rec and writer is None:
+                    rec_path = os.path.join("out", "rec_%s.mp4" % time.strftime("%Y%m%d_%H%M%S"))
+                    writer = imageio.get_writer(rec_path, fps=24, macro_block_size=8)
+                elif not want_rec and writer is not None:
+                    writer.close(); print("saved", rec_path); writer = None
+
+            if mirror:
+                frame = cv2.flip(frame, 1)
+            small = cv2.resize(frame, (mw, mh))
             m = cv2.resize(mat.compute(small), (gw, gh))
             gray = cv2.resize(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0,
                               (gw, gh))
             color = cv2.cvtColor(cv2.resize(small, (gw, gh)), cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+
+            exposure_base, spark_base = glow.exposure, pf.spark
+            if mic is not None and mic.available:
+                lv = mic.levels(); sens = (cv2.getTrackbarPos("sensitivity", ctl) / 10.0
+                                           if (show and panel) else 1.0)
+                glow.exposure = exposure_base * (1.0 + 1.6 * sens * lv["bass"])
+                pf.spark = spark_base + 1.2 * sens * lv["treble"]
+
             pf.update(m, gray, color)
             out = glow.render(pf.render_data())
+            glow.exposure, pf.spark = exposure_base, spark_base
             if writer is not None:
                 writer.append_data(out)
             bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
@@ -120,62 +179,29 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
                 now = time.time(); fps = 10.0 / (now - t0); t0 = now
 
             if show:
-                cv2.putText(bgr, f"{fps:4.1f}fps  preset={cur_preset or '-'}  matte={matte_kind}  "
-                                 f"color={pf.palette}  cam={cam_name[:14]}",
-                            (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (90, 220, 120), 1, cv2.LINE_AA)
-                cv2.putText(bgr, "q quit  p preset  o save  n matte  c color  m mirror  "
-                                 "[ ] trail  -/= glow  r REC  space freeze",
-                            (12, rh - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.46, (80, 180, 110), 1,
-                            cv2.LINE_AA)
+                cv2.putText(bgr, f"{fps:4.1f}fps  matte={matte_kind}  color={pf.palette}  "
+                                 f"cam={cam_name[:16]}", (12, 24),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (90, 220, 120), 1, cv2.LINE_AA)
+                if black_streak > 15:
+                    cv2.putText(bgr, "CAMERA IS BLACK — disable iPhone Continuity Camera",
+                                (12, rh // 2 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8,
+                                (60, 60, 240), 2, cv2.LINE_AA)
+                    cv2.putText(bgr, "iPhone: Settings > General > AirPlay & Handoff > Continuity Camera > Off",
+                                (12, rh // 2 + 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                                (120, 120, 240), 1, cv2.LINE_AA)
                 if writer is not None:
                     cv2.circle(bgr, (rw - 24, 24), 8, (60, 60, 235), -1)
-                    cv2.putText(bgr, "REC", (rw - 70, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                                (60, 60, 235), 2, cv2.LINE_AA)
                 cv2.imshow(win, bgr)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord('q'), 27):
                     break
-                elif key == ord('n'):
-                    matte_kind = _MATTE_CYCLE[(_MATTE_CYCLE.index(matte_kind) + 1) % len(_MATTE_CYCLE)]
-                    mat = make_matte(matte_kind)
-                elif key == ord('c'):
-                    pf.cycle_palette()
-                elif key == ord('p'):
-                    if preset_names:
-                        i = (preset_names.index(cur_preset) + 1) % len(preset_names) \
-                            if cur_preset in preset_names else 0
-                        cur_preset = preset_names[i]; apply_preset(cur_preset)
-                elif key == ord('o'):
-                    name = "mine_%s" % time.strftime("%H%M%S")
-                    cfg = dict(matte=matte_kind, palette=pf.palette, fade=glow.fade,
-                               exposure=glow.exposure, spark=pf.spark, curl_amp=pf.curl_amp,
-                               reseed_frac=pf.reseed_frac, base_size=pf.base_size)
-                    path = _presets.save(name, cfg)
-                    all_presets[name] = cfg; preset_names.append(name); cur_preset = name
-                    print("saved preset", name, "->", path)
-                elif key == ord('m'):
-                    mirror = not mirror
-                elif key == ord('['):
-                    glow.fade = max(glow.fade - 0.02, 0.5)
-                elif key == ord(']'):
-                    glow.fade = min(glow.fade + 0.02, 0.985)
-                elif key in (ord('-'), ord('_')):
-                    glow.exposure = max(glow.exposure - 0.1, 0.3)
-                elif key in (ord('='), ord('+')):
-                    glow.exposure = min(glow.exposure + 0.1, 4.0)
-                elif key == ord('r'):
-                    if writer is None:
-                        rec_path = os.path.join("out", "rec_%s.mp4" % time.strftime("%Y%m%d_%H%M%S"))
-                        writer = imageio.get_writer(rec_path, fps=24, macro_block_size=8)
-                    else:
-                        writer.close(); print("saved recording ->", rec_path); writer = None
-                elif key == ord(' '):
-                    frozen = not frozen
             if max_frames is not None and count >= max_frames:
                 break
     finally:
         if writer is not None:
-            writer.close(); print("saved recording ->", rec_path)
+            writer.close(); print("saved", rec_path)
+        if mic is not None:
+            mic.stop()
         cap.release()
         glow.release()
         if show:
@@ -183,97 +209,36 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
     return count, out
 
 
-def live(device=0, grid=(140, 79), res=(1100, 620), depth=1.3, seed=0,
-         mirror=True, show=True, max_frames=None):
-    """Run the live displacement preview. Returns the number of frames processed.
-
-    `show=False` / `max_frames=N` is a headless smoke mode: it runs the real capture +
-    render path for N frames without opening a window (used to verify before launching).
-    """
-    gx, gy = grid
-    rw, rh = res
-    n = gx * gy
-
-    cap = _open_capture(device)
-    if not cap.isOpened():
-        raise RuntimeError(f"could not open capture device {device!r}")
-
-    grid_pos = make_grid(gx, gy)
-    scale = random_scale(n, seed=seed)
-    euler = random_euler(n, seed=seed + 1)
-    base_size = 0.8 / max(gx, gy)
-    renderer = Renderer(rw, rh, n, base_size=base_size, depth_scale=depth)
-
-    win = "dtouch — live"
+def live(device="builtin", res=(1024, 576), grid=(130, 73), depth=1.3, mirror=True,
+         show=True, max_frames=None):
+    """Legacy luminance-displaced grid effect (kept as a simple fallback)."""
+    from .field import make_grid, displace_z, random_scale, random_euler, pack_instances
+    from .render import Renderer
+    gx, gy = grid; rw, rh = res; n = gx * gy
+    cap, _ = open_camera(device)
+    g = make_grid(gx, gy); s = random_scale(n, 0); e = random_euler(n, 1)
+    r = Renderer(rw, rh, n, base_size=0.8 / max(gx, gy), depth_scale=depth)
     if show:
-        cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(win, rw, rh)
-
-    invert = False
-    frozen = False
-    last_luma = None
-    t0 = time.time()
-    fps = 0.0
-    count = 0
+        cv2.namedWindow("dtouch — grid", cv2.WINDOW_NORMAL)
+    count = 0; out = None
     try:
         while True:
-            if not frozen or last_luma is None:
-                ok, frame = cap.read()
-                if not ok:
-                    if max_frames is None:
-                        continue
-                    break
-                if mirror:
-                    frame = cv2.flip(frame, 1)
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                small = cv2.resize(gray, (gx, gy), interpolation=cv2.INTER_AREA)
-                luma = small.astype(np.float32) / 255.0
-                if invert:
-                    luma = 1.0 - luma
-                last_luma = luma
-            else:
-                luma = last_luma
-
-            buf = pack_instances(displace_z(grid_pos, luma, depth), scale, euler)
-            img = renderer.render(buf)              # RGB
-            bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-
-            count += 1
-            if count % 10 == 0:
-                now = time.time()
-                fps = 10.0 / (now - t0)
-                t0 = now
-
+            ok, frame = cap.read()
+            if not ok:
+                if max_frames is None: continue
+                break
+            if mirror: frame = cv2.flip(frame, 1)
+            luma = cv2.resize(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), (gx, gy)).astype(np.float32) / 255.0
+            out = r.render(pack_instances(displace_z(g, luma, depth), s, e))
             if show:
-                cv2.putText(bgr, f"{fps:4.1f} fps  depth={depth:.2f}  "
-                                 f"[q]uit +/- depth  [ ] size  m mirror  i invert  space freeze",
-                            (12, rh - 16), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (90, 220, 90), 1,
-                            cv2.LINE_AA)
-                cv2.imshow(win, bgr)
-                key = cv2.waitKey(1) & 0xFF
-                if key in (ord('q'), 27):
+                cv2.imshow("dtouch — grid", cv2.cvtColor(out, cv2.COLOR_RGB2BGR))
+                if (cv2.waitKey(1) & 0xFF) in (ord('q'), 27):
                     break
-                elif key in (ord('+'), ord('=')):
-                    depth = min(depth + 0.1, 4.0)
-                elif key in (ord('-'), ord('_')):
-                    depth = max(depth - 0.1, 0.0)
-                elif key == ord(']'):
-                    base_size *= 1.1; renderer.prog["u_base_size"].value = float(base_size)
-                elif key == ord('['):
-                    base_size /= 1.1; renderer.prog["u_base_size"].value = float(base_size)
-                elif key == ord('m'):
-                    mirror = not mirror
-                elif key == ord('i'):
-                    invert = not invert
-                elif key == ord(' '):
-                    frozen = not frozen
-
+            count += 1
             if max_frames is not None and count >= max_frames:
                 break
     finally:
-        cap.release()
-        renderer.release()
+        cap.release(); r.release()
         if show:
-            cv2.destroyAllWindows()
-            cv2.waitKey(1)
-    return count
+            cv2.destroyAllWindows(); cv2.waitKey(1)
+    return count, out

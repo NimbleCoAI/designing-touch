@@ -1,7 +1,7 @@
 """TDD for the audio DSP core."""
 import numpy as np
 
-from dtouch.audio import analyze_block, SyntheticAudio
+from dtouch.audio import analyze_block, SyntheticAudio, LiveMic
 
 
 def _tone(freq, sr=44100, n=2048, amp=1.0):
@@ -52,3 +52,22 @@ def test_synthetic_audio_timeline_is_normalized_and_reactive():
     # normalized into ~[0,1.5] and actually time-varying (the beat)
     assert bass.max() <= 1.5 + 1e-6
     assert bass.std() > 0.1
+
+
+def test_live_mic_band_math_and_normalization():
+    mic = LiveMic(sr=44100, block=2048)
+    t = np.arange(2048) / 44100
+    bass_block = np.sin(2 * np.pi * 60 * t).reshape(-1, 1).astype(np.float32)
+    for _ in range(5):
+        mic._callback(bass_block, 2048, None, None)
+    lv = mic.levels()
+    assert set(lv) == {"amp", "bass", "mid", "treble"}
+    assert all(0.0 <= v <= 1.0 for v in lv.values())
+    assert lv["bass"] > lv["treble"]          # bass tone -> bass dominates
+
+
+def test_live_mic_start_is_graceful():
+    mic = LiveMic()
+    ok = mic.start()                          # may be True/False depending on permission
+    assert isinstance(ok, bool)
+    mic.stop()
