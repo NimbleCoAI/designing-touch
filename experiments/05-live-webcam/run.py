@@ -41,8 +41,12 @@ def main():
     args = ap.parse_args()
 
     if args.list_cameras:
-        for i, name in list_cameras() or [(0, "(AVFoundation enumeration unavailable)")]:
-            print(f"  [{i}] {name}")
+        cams = list_cameras()
+        if not cams:
+            print("  (AVFoundation enumeration unavailable)")
+        for i, name, dtype in cams:
+            tag = dtype.replace("AVCaptureDeviceType", "")
+            print(f"  [{i}] {name}  ({tag})")
         return
 
     device = int(args.device) if args.device.isdigit() else args.device
