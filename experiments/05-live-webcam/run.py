@@ -29,6 +29,8 @@ def parse_wh(s):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="flow", choices=["flow", "grid"])
+    ap.add_argument("--ui", default="gui", choices=["gui", "keys"],
+                    help="gui = control-panel window (default); keys = keyboard-only window")
     ap.add_argument("--device", default="builtin",
                     help="'builtin' (laptop cam), an index, or a name substring")
     ap.add_argument("--matte", default="auto",
@@ -52,7 +54,11 @@ def main():
         return
 
     device = int(args.device) if args.device.isdigit() else args.device
-    if args.mode == "flow":
+    if args.mode == "flow" and args.ui == "gui":
+        from dtouch.gui import run_gui
+        run_gui(device=device, res=parse_wh(args.res), grid=parse_wh(args.grid),
+                n=args.particles, preset=args.preset or "abstract")
+    elif args.mode == "flow":
         live_flow(device=device, matte=args.matte, res=parse_wh(args.res),
                   grid=parse_wh(args.grid), n=args.particles, preset=args.preset,
                   mirror=not args.no_mirror)
