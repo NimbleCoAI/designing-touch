@@ -14,11 +14,11 @@ TOP (video/webcam)  ->  TOP to POP  ->  displace points by luminance (height = r
 
 ## The code equivalent (operators)
 
-Each stage is a small, pure operator in `ops/` — the "node graph as code" seed:
+Each stage is a small, pure operator in the shared `dtouch/` engine:
 
-| TouchDesigner node            | Code (`ops/`)                                  |
+| TouchDesigner node            | Code (`dtouch`)                                |
 |-------------------------------|------------------------------------------------|
-| TOP (video in)                | `sources.py` — synthetic / image / webcam/video |
+| TOP (video in)                | `sources` — synthetic / image / webcam/video    |
 | TOP → POP                     | `field.make_grid` + `field.displace_z`         |
 | Random (scale), Random (rot)  | `field.random_scale`, `field.random_euler`     |
 | Copy SOP (instance a box)     | `render.Renderer` — GPU instanced unit cube     |
@@ -32,7 +32,7 @@ across frames; only the Z position changes with the incoming luminance — exact
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r ../../requirements.txt
+pip install -e ../..        # installs the dtouch engine
 
 # synthetic source — no camera, no input file needed (good for CI / quick checks)
 python run.py --frames 90
@@ -68,9 +68,6 @@ as a topographic relief; the blob spikes toward the camera.
 
 ## Tests
 
-```bash
-cd experiments/01-displacement && python -m pytest tests/ -q
-```
-
-`test_field.py` covers the deterministic transforms (grid, displacement, randoms, packing);
-`test_pipeline.py` is an end-to-end smoke test that renders a frame and asserts it isn't empty.
+Engine tests live at the repo root (`pytest tests/ -q`): `test_field.py` covers the
+deterministic transforms, `test_graph.py` the operator spine, and `test_render.py` is an
+end-to-end render smoke test.

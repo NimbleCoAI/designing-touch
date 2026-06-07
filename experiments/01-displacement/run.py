@@ -20,9 +20,8 @@ import os
 import numpy as np
 import imageio.v2 as imageio
 
-from ops.sources import make_source
-from ops.field import make_grid, displace_z, random_scale, random_euler, pack_instances
-from ops.render import Renderer
+from dtouch import (make_source, make_grid, displace_z, random_scale,
+                    random_euler, pack_instances, Renderer)
 
 
 def parse_grid(s: str):
