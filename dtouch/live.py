@@ -16,10 +16,12 @@ This is the interactive counterpart to the file-rendering experiments. It needs 
 """
 from __future__ import annotations
 
+import os
 import time
 
 import cv2
 import numpy as np
+import imageio.v2 as imageio
 
 from .field import make_grid, displace_z, random_scale, random_euler, pack_instances
 from .render import Renderer
@@ -65,6 +67,8 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
     last_small = None
     t0 = time.time(); fps = 0.0; count = 0
     out = None
+    writer = None; rec_path = None
+    os.makedirs("out", exist_ok=True)
     try:
         while True:
             if not frozen or last_small is None:
@@ -83,6 +87,8 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
                               (gw, gh))
             pf.update(m, gray)
             out = glow.render(pf.render_data())
+            if writer is not None:
+                writer.append_data(out)
             bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
 
             count += 1
@@ -90,12 +96,16 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
                 now = time.time(); fps = 10.0 / (now - t0); t0 = now
 
             if show:
-                cv2.putText(bgr, f"{fps:4.1f}fps  matte={matte_kind}  cam={cam_name[:18]}  "
-                                 f"fade={glow.fade:.2f} exp={glow.exposure:.1f}",
+                cv2.putText(bgr, f"{fps:4.1f}fps  matte={matte_kind}  color={pf.palette}  "
+                                 f"cam={cam_name[:16]}  fade={glow.fade:.2f}",
                             (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (90, 220, 120), 1, cv2.LINE_AA)
-                cv2.putText(bgr, "q quit  n matte  m mirror  [ ] trail  -/= glow  space freeze",
-                            (12, rh - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (80, 180, 110), 1,
+                cv2.putText(bgr, "q quit  n matte  c color  m mirror  [ ] trail  -/= glow  r REC  space freeze",
+                            (12, rh - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (80, 180, 110), 1,
                             cv2.LINE_AA)
+                if writer is not None:
+                    cv2.circle(bgr, (rw - 24, 24), 8, (60, 60, 235), -1)
+                    cv2.putText(bgr, "REC", (rw - 70, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                                (60, 60, 235), 2, cv2.LINE_AA)
                 cv2.imshow(win, bgr)
                 key = cv2.waitKey(1) & 0xFF
                 if key in (ord('q'), 27):
@@ -103,6 +113,8 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
                 elif key == ord('n'):
                     matte_kind = _MATTE_CYCLE[(_MATTE_CYCLE.index(matte_kind) + 1) % len(_MATTE_CYCLE)]
                     mat = make_matte(matte_kind)
+                elif key == ord('c'):
+                    pf.cycle_palette()
                 elif key == ord('m'):
                     mirror = not mirror
                 elif key == ord('['):
@@ -113,11 +125,19 @@ def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
                     glow.exposure = max(glow.exposure - 0.1, 0.3)
                 elif key in (ord('='), ord('+')):
                     glow.exposure = min(glow.exposure + 0.1, 4.0)
+                elif key == ord('r'):
+                    if writer is None:
+                        rec_path = os.path.join("out", "rec_%s.mp4" % time.strftime("%Y%m%d_%H%M%S"))
+                        writer = imageio.get_writer(rec_path, fps=24, macro_block_size=8)
+                    else:
+                        writer.close(); print("saved recording ->", rec_path); writer = None
                 elif key == ord(' '):
                     frozen = not frozen
             if max_frames is not None and count >= max_frames:
                 break
     finally:
+        if writer is not None:
+            writer.close(); print("saved recording ->", rec_path)
         cap.release()
         glow.release()
         if show:

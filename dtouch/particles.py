@@ -13,6 +13,21 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+PALETTES = ["ice", "rainbow", "fire", "aurora", "mono"]
+
+
+def _hsv2rgb(h, s, v):
+    """Vectorized HSV->RGB. h,s,v are (N,) arrays in [0,1]. Returns (N,3)."""
+    h = (h % 1.0) * 6.0
+    i = np.floor(h).astype(np.int32)
+    f = h - i
+    p = v * (1 - s); q = v * (1 - f * s); t = v * (1 - (1 - f) * s)
+    i = i % 6
+    r = np.choose(i, [v, q, p, p, t, v])
+    g = np.choose(i, [t, v, v, q, p, p])
+    b = np.choose(i, [p, p, t, v, v, q])
+    return np.stack([r, g, b], axis=1).astype(np.float32)
+
 
 def _bilinear(grid, x, y, gw, gh):
     x = np.clip(x, 0, gw - 1.001)
@@ -41,6 +56,7 @@ class ParticleFlow:
         self.pull_falloff, self.flow_gain, self.curl_amp = pull_falloff, flow_gain, curl_amp
         self.damp, self.reseed_sdf, self.reseed_frac = damp, reseed_sdf, reseed_frac
         self.base_size, self.speed_ref = base_size, speed_ref
+        self.palette = "ice"
         self._rng = rng
         self._prev_gray = None
         self._z = np.zeros(n, np.float32)
@@ -140,8 +156,28 @@ class ParticleFlow:
         z = self._z
         bright = (0.30 + 0.70 * sp) * (0.45 + 0.55 * z)
         size = self.base_size * (0.7 + 1.0 * z)
-        col = self.tint[None, :] * (1 - 0.6 * sp)[:, None] + np.float32(1.0) * (0.6 * sp)[:, None]
+        col = self._colorize(sp, z)
         out = np.empty((self.n, 7), np.float32)
         out[:, 0] = x_ndc; out[:, 1] = y_ndc; out[:, 2] = size; out[:, 3] = bright
         out[:, 4:7] = col
         return out.reshape(-1)
+
+    def _colorize(self, sp, z):
+        n = self.n
+        if self.palette == "mono":
+            return np.ones((n, 3), np.float32)
+        if self.palette == "rainbow":
+            hue = (np.arctan2(self.vy, self.vx) / (2 * np.pi)) + 0.5
+            return _hsv2rgb(hue, np.full(n, 0.65, np.float32), np.ones(n, np.float32))
+        if self.palette == "fire":
+            hue = 0.02 + 0.12 * np.clip(sp + 0.4 * z, 0, 1)        # red -> yellow
+            return _hsv2rgb(hue, 1.0 - 0.35 * sp, np.ones(n, np.float32))
+        if self.palette == "aurora":
+            hue = 0.33 + 0.5 * (self.py / self.gh)                  # green -> magenta by height
+            return _hsv2rgb(hue, np.full(n, 0.7, np.float32), np.ones(n, np.float32))
+        # ice (default): cool tint whitening with speed
+        return self.tint[None, :] * (1 - 0.6 * sp)[:, None] + (0.6 * sp)[:, None]
+
+    def cycle_palette(self) -> str:
+        self.palette = PALETTES[(PALETTES.index(self.palette) + 1) % len(PALETTES)]
+        return self.palette
