@@ -35,8 +35,10 @@ class OverlayUI:
         self.matte_idx = mattes.index(matte) if matte in mattes else 0
         self.palette_idx = palettes.index(palette) if palette in palettes else 0
         self.fade, self.exposure, self.spark, self.curl, self.dot = 0.90, 1.4, 0.35, 0.5, 0.011
+        self.count = 1.0   # fraction of the allocated particles to render
         self.mirror, self.audio, self.sens, self.record = True, False, 1.0, False
         self.open = True
+        self._tooltip = None
         self.pending_preset = None
         self.pending_save = False
         self.panel_w = 290
@@ -76,14 +78,21 @@ class OverlayUI:
         self._hot.append(((x, y, x + w, y + h), key, payload))
         return rect
 
-    def _slider(self, img, label, attr, x, y, w):
+    def _slider(self, img, label, attr, x, y, w, info=None):
         lo, hi = _RANGES[attr]
         val = getattr(self, attr)
         rect = (x, y, x + w, y + 26)
         hovered = _in(rect, self.mouse)
         self._box(img, rect, HOVER if hovered else BTN)
-        self._text(img, label, x + 8, y + 17, DIM, 0.42)
-        tx0, tx1 = x + 90, x + w - 44
+        # info badge
+        ic = (x + 14, y + 13)
+        irect = (x + 4, y + 3, x + 24, y + 23)
+        cv2.circle(img, ic, 8, (90, 110, 150), -1, cv2.LINE_AA)
+        self._text(img, "i", ic[0] - 2, ic[1] + 5, (235, 240, 245), 0.42, 1)
+        if info and _in(irect, self.mouse):
+            self._tooltip = (info, x, y)
+        self._text(img, label, x + 30, y + 17, DIM, 0.42)
+        tx0, tx1 = x + 96, x + w - 44
         cv2.line(img, (tx0, y + 13), (tx1, y + 13), TRACK, 3, cv2.LINE_AA)
         hx = int(tx0 + (val - lo) / (hi - lo) * (tx1 - tx0))
         cv2.circle(img, (hx, y + 13), 6, HANDLE, -1, cv2.LINE_AA)
@@ -108,6 +117,7 @@ class OverlayUI:
     # ----- layout -----
     def draw(self, frame, info):
         self._hot = []
+        self._tooltip = None
         h, w = frame.shape[:2]
         if not self.open:
             r = (w - 48, 12, w - 12, 42)
@@ -141,14 +151,14 @@ class OverlayUI:
 
         self._text(frame, "LOOK", x, y, DIM, 0.4); y += 6
         y = self._cycle(frame, "color", self.palette_name, "color", x, y, cw) + 4
-        for label, attr in (("Trails", "fade"), ("Glow", "exposure"), ("Spark", "spark"),
-                            ("Flow", "curl"), ("Dot", "dot")):
-            y = self._slider(frame, label, attr, x, y, cw)
+        for label, attr, tip in _SLIDERS:
+            y = self._slider(frame, label, attr, x, y, cw, tip)
 
         y += 4
         self._row(frame, "Sound react: " + ("ON" if self.audio else "off"),
                   "audio", x, y, cw, active=self.audio); y += 28
-        y = self._slider(frame, "Sens", "sens", x, y, cw) + 4
+        y = self._slider(frame, "Sens", "sens", x, y, cw,
+                         "How strongly sound drives the visuals.") + 4
         self._row(frame, ("Stop recording" if self.record else "Record"),
                   "record", x, y, cw, active=self.record); y += 28
         self._row(frame, "Mirror: " + ("on" if self.mirror else "off"),
@@ -158,8 +168,28 @@ class OverlayUI:
         if self._flash > 0 and self._flash_rect is not None:
             self._box(frame, self._flash_rect, BTN, border=(255, 255, 255))
             self._flash -= 1
+        self._draw_tooltip(frame)
         self._draw_status(frame, info)
         return frame
+
+    def _draw_tooltip(self, frame):
+        if not self._tooltip:
+            return
+        text, sx, sy = self._tooltip
+        words, lines, cur = text.split(), [], ""
+        for wd in words:
+            if len(cur) + len(wd) + 1 > 30:
+                lines.append(cur); cur = wd
+            else:
+                cur = (cur + " " + wd).strip()
+        if cur:
+            lines.append(cur)
+        bw, bh = 250, 16 * len(lines) + 16
+        bx = max(sx - bw - 14, 10)
+        by = max(min(sy, self.h - bh - 10), 10)
+        self._box(frame, (bx, by, bx + bw, by + bh), (44, 48, 56), border=(120, 140, 170))
+        for i, ln in enumerate(lines):
+            self._text(frame, ln, bx + 10, by + 20 + i * 16, INK, 0.42)
 
     def _draw_status(self, frame, info):
         self._text(frame, info.get("status", ""), 12, 24, ACC, 0.5)
@@ -219,4 +249,14 @@ class OverlayUI:
 _RANGES = {
     "fade": (0.50, 0.985), "exposure": (0.3, 4.0), "spark": (0.0, 1.0),
     "curl": (0.0, 1.0), "dot": (0.004, 0.020), "sens": (0.0, 3.0),
+    "count": (0.1, 1.0),
 }
+
+_SLIDERS = [
+    ("Trails", "fade", "How long particle motion trails linger before fading."),
+    ("Glow", "exposure", "Overall brightness and bloom of the particles."),
+    ("Spark", "spark", "How much fast motion scatters particles into bursts of sparks."),
+    ("Flow", "curl", "Swirling, turbulent drift of the particles."),
+    ("Size", "dot", "Size of each individual particle dot."),
+    ("Count", "count", "How many particles (density of the cloud)."),
+]
