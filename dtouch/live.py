@@ -71,13 +71,14 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
     ui = None
     win = "dtouch - flow"
     if show:
-        cv2.namedWindow(win, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(win, rw, rh)
+        # AUTOSIZE: the window is fixed at the render resolution so the OS can't maximize/scale
+        # it — that scaling was tanking fps (display upscaling) and breaking click mapping.
+        # To go bigger, switch the 'output' resolution; the window resizes to match natively.
+        cv2.namedWindow(win, cv2.WINDOW_AUTOSIZE)
         if panel:
             ui = OverlayUI(rw, rh, preset_names, PALETTES, MATTES,
                            preset=preset, matte=matte_kind, palette=pf.palette)
-            ui.sync_from(glow.fade, glow.exposure, pf.spark, pf.curl_amp, pf.base_size,
-                         matte_kind, pf.palette)
+            ui.sync_from(pf, glow, matte_kind)
             ui.mirror = mirror
             ui.audio = audio
             cv2.setMouseCallback(win, ui.on_mouse)
@@ -103,14 +104,15 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
             if ui is not None:
                 if ui.pending_preset:
                     apply_preset(ui.pending_preset)
-                    ui.sync_from(glow.fade, glow.exposure, pf.spark, pf.curl_amp,
-                                 pf.base_size, matte_kind, pf.palette)
+                    ui.sync_from(pf, glow, matte_kind)
                     ui.pending_preset = None
                 if ui.pending_save:
                     name = "mine_%s" % time.strftime("%H%M%S")
                     _presets.save(name, dict(matte=matte_kind, palette=pf.palette,
                                   fade=glow.fade, exposure=ui.exposure, spark=ui.spark,
-                                  curl_amp=ui.curl, reseed_frac=pf.reseed_frac, base_size=ui.dot))
+                                  curl_amp=ui.curl, reseed_frac=ui.reseed, base_size=ui.dot,
+                                  damp=ui.damp, pull_falloff=ui.pull,
+                                  attract_speed=pf.attract_speed))
                     all_presets = _presets.load()
                     preset_names = list(all_presets.keys())
                     ui.presets = preset_names
@@ -123,14 +125,16 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
                 pf.palette = ui.palette_name
                 pf.curl_amp = ui.curl
                 pf.base_size = ui.dot
+                pf.damp = ui.damp
+                pf.pull_falloff = ui.pull
+                pf.reseed_frac = ui.reseed
                 glow.fade = ui.fade
                 mirror = ui.mirror
                 nw, nh = ui.res_wh
                 if (nw, nh) != (rw, rh):
                     rw, rh = nw, nh
                     glow.resize(rw, rh)
-                    cv2.resizeWindow(win, rw, rh)
-                    ui.w, ui.h = rw, rh
+                    ui.w, ui.h = rw, rh   # AUTOSIZE window refits on next imshow
                 if ui.audio and mic is None:
                     mic = LiveMic(); mic.start()
                 elif not ui.audio and mic is not None:
