@@ -51,18 +51,19 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
 
     def apply_preset(name):
         nonlocal matte_kind, mat
-        cfg = all_presets.get(name)
-        if not cfg:
+        if name not in all_presets:
             return
+        # merge over defaults so switching presets fully resets physics params
+        # (otherwise e.g. sigil's low damping would leak into the next look)
+        d = dict(palette="ice", spark=0.35, curl_amp=0.5, reseed_frac=0.06, base_size=0.011,
+                 damp=0.90, pull_falloff=22.0, attract_speed=4.5, fade=0.90, exposure=1.4)
+        cfg = {**d, **all_presets[name]}
         if cfg.get("matte") and cfg["matte"] != matte_kind:
             matte_kind = cfg["matte"]; mat = make_matte(cfg["matte"])
-        if "palette" in cfg: pf.palette = cfg["palette"]
-        if "spark" in cfg: pf.spark = cfg["spark"]
-        if "curl_amp" in cfg: pf.curl_amp = cfg["curl_amp"]
-        if "reseed_frac" in cfg: pf.reseed_frac = cfg["reseed_frac"]
-        if "base_size" in cfg: pf.base_size = cfg["base_size"]
-        if "fade" in cfg: glow.fade = cfg["fade"]
-        if "exposure" in cfg: glow.exposure = cfg["exposure"]
+        pf.palette = cfg["palette"]; pf.spark = cfg["spark"]; pf.curl_amp = cfg["curl_amp"]
+        pf.reseed_frac = cfg["reseed_frac"]; pf.base_size = cfg["base_size"]; pf.damp = cfg["damp"]
+        pf.pull_falloff = cfg["pull_falloff"]; pf.attract_speed = cfg["attract_speed"]
+        glow.fade = cfg["fade"]; glow.exposure = cfg["exposure"]
 
     if preset in all_presets:
         apply_preset(preset)
@@ -158,7 +159,12 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
 
             # video palette = textured/recognizable: weight particle density by the footage's
             # luminance inside the subject so the face's tones resolve as a pointillist portrait.
-            density = m * np.clip((gray - 0.08) * 1.6, 0.03, 1.0) if pf.palette == "video" else None
+            # weight density by luminance for portraits (video palette OR person matte) so the
+            # face's tones resolve as particle density — on ANY color, not just video.
+            if pf.palette == "video" or matte_kind == "person":
+                density = m * np.clip((gray - 0.06) * 1.5, 0.05, 1.0)
+            else:
+                density = None
             pf.update(m, gray, color, density=density)
             buf = pf.render_data()
             if ui is not None and ui.count < 0.999:
@@ -180,9 +186,13 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
                     cv2.putText(bgr, status, (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                                 (90, 220, 120), 1, cv2.LINE_AA)
                 cv2.imshow(win, bgr)
-                cv2.waitKey(1)  # pump GUI + mouse; ESC intentionally does NOT quit
-                if cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:
-                    break  # window closed via the red X
+                key = cv2.waitKey(1) & 0xFF   # pump GUI + mouse; ESC intentionally ignored
+                if key == ord('q') or (ui is not None and ui.quit):
+                    break
+                # quit only when the window is actually destroyed (red X) -> property is -1.
+                # A minimized window reports 0, so this does NOT quit on minimize.
+                if cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 0:
+                    break
             if max_frames is not None and count >= max_frames:
                 break
     finally:

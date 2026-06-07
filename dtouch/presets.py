@@ -12,7 +12,8 @@ import os
 from typing import Dict
 
 # live-applicable keys a preset may set
-KEYS = ("matte", "palette", "fade", "exposure", "spark", "curl_amp", "reseed_frac", "base_size")
+KEYS = ("matte", "palette", "fade", "exposure", "spark", "curl_amp", "reseed_frac",
+        "base_size", "damp", "pull_falloff", "attract_speed")
 
 BUILTIN: Dict[str, dict] = {
     # the loved abstract cloud
@@ -28,6 +29,11 @@ BUILTIN: Dict[str, dict] = {
                    spark=0.5, curl_amp=0.6, reseed_frac=0.06, base_size=0.012),
     "aurora": dict(matte="motion", palette="aurora", fade=0.92, exposure=1.5,
                    spark=0.4, curl_amp=0.5, reseed_frac=0.06, base_size=0.011),
+    # "sigil": sharp inward pull + very low damping make particles overshoot into glowing
+    # contour bands along the silhouette, with caustic streaks — cyber-sigil / techcore.
+    "sigil": dict(matte="person", palette="mono", fade=0.96, exposure=1.5, spark=0.0,
+                  curl_amp=0.08, reseed_frac=0.008, base_size=0.006, damp=0.975,
+                  pull_falloff=12.0, attract_speed=5.0),
 }
 
 

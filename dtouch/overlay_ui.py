@@ -35,13 +35,14 @@ class OverlayUI:
         self.matte_idx = mattes.index(matte) if matte in mattes else 0
         self.palette_idx = palettes.index(palette) if palette in palettes else 0
         self.fade, self.exposure, self.spark, self.curl, self.dot = 0.90, 1.4, 0.35, 0.5, 0.011
-        self.count = 0.6   # fraction of the allocated particles to render
+        self.count = 0.75   # fraction of the allocated particles to render
         self.mirror, self.audio, self.sens, self.record = True, False, 1.0, False
         self.res_options = [("720p", 1280, 720), ("1080p", 1920, 1080),
                             ("1440p", 2560, 1440), ("4K", 3840, 2160)]
         self.res_idx = next((i for i, (_, rw, rh) in enumerate(self.res_options)
                              if (rw, rh) == (w, h)), 1)
         self.open = True
+        self.quit = False
         self._tooltip = None
         self.pending_preset = None
         self.pending_save = False
@@ -171,7 +172,8 @@ class OverlayUI:
         self._row(frame, ("Stop recording" if self.record else "Record"),
                   "record", x, y, cw, active=self.record); y += 28
         self._row(frame, "Mirror: " + ("on" if self.mirror else "off"),
-                  "mirror", x, y, cw, active=self.mirror)
+                  "mirror", x, y, cw, active=self.mirror); y += 32
+        self._row(frame, "Quit", "quit", x, y, cw)
 
         # click feedback: flash the last-clicked control
         if self._flash > 0 and self._flash_rect is not None:
@@ -255,6 +257,8 @@ class OverlayUI:
             self.mirror = not self.mirror
         elif kind == "save":
             self.pending_save = True
+        elif kind == "quit":
+            self.quit = True
 
 
 _RANGES = {
