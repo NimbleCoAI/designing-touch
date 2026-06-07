@@ -35,6 +35,7 @@ class OverlayUI:
         self.matte_idx = mattes.index(matte) if matte in mattes else 0
         self.palette_idx = palettes.index(palette) if palette in palettes else 0
         self.fade, self.exposure, self.spark, self.curl, self.dot = 0.90, 1.4, 0.35, 0.5, 0.011
+        self.damp, self.pull, self.reseed = 0.90, 22.0, 0.06   # motion physics (sigil knobs)
         self.count = 0.75   # fraction of the allocated particles to render
         self.mirror, self.audio, self.sens, self.record = True, False, 1.0, False
         self.res_options = [("720p", 1280, 720), ("1080p", 1920, 1080),
@@ -64,10 +65,13 @@ class OverlayUI:
     @property
     def preset_name(self): return self.presets[self.preset_idx]
 
-    def sync_from(self, fade, exposure, spark, curl, dot, matte, palette):
-        self.fade, self.exposure, self.spark, self.curl, self.dot = fade, exposure, spark, curl, dot
+    def sync_from(self, pf, glow, matte):
+        """Reflect engine state into the sliders (after a preset is applied)."""
+        self.fade, self.exposure = glow.fade, glow.exposure
+        self.spark, self.curl, self.dot = pf.spark, pf.curl_amp, pf.base_size
+        self.damp, self.pull, self.reseed = pf.damp, pf.pull_falloff, pf.reseed_frac
         if matte in self.mattes: self.matte_idx = self.mattes.index(matte)
-        if palette in self.palettes: self.palette_idx = self.palettes.index(palette)
+        if pf.palette in self.palettes: self.palette_idx = self.palettes.index(pf.palette)
 
     # ----- primitives -----
     def _text(self, img, s, x, y, color=INK, scale=0.46, thick=1):
@@ -264,7 +268,7 @@ class OverlayUI:
 _RANGES = {
     "fade": (0.50, 0.985), "exposure": (0.3, 4.0), "spark": (0.0, 1.0),
     "curl": (0.0, 1.0), "dot": (0.004, 0.020), "sens": (0.0, 3.0),
-    "count": (0.1, 1.0),
+    "count": (0.1, 1.0), "damp": (0.82, 0.985), "pull": (8.0, 40.0), "reseed": (0.005, 0.15),
 }
 
 _SLIDERS = [
@@ -274,4 +278,10 @@ _SLIDERS = [
     ("Flow", "curl", "Swirling, turbulent drift of the particles."),
     ("Size", "dot", "Size of each individual particle dot."),
     ("Count", "count", "How many particles (density of the cloud)."),
+    ("Glide", "damp", "How long particles keep gliding. High = they overshoot into sharp "
+                      "contour lines (the sigil look); low = they stop quickly."),
+    ("Pull", "pull", "How sharply particles are pulled to the shape. Low = tighter, brighter "
+                     "edge bands."),
+    ("Reseed", "reseed", "How fast particles respawn. Low = they persist and trace flowing "
+                         "lines; high = a constantly refreshing spray."),
 ]
