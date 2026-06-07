@@ -19,11 +19,11 @@ BUILTIN: Dict[str, dict] = {
     "abstract": dict(matte="auto", palette="ice", fade=0.90, exposure=1.4,
                      spark=0.35, curl_amp=0.5, reseed_frac=0.06, base_size=0.011),
     # recognizable: particles painted with the real footage, calm so the shape holds
-    "portrait": dict(matte="person", palette="video", fade=0.78, exposure=2.0,
-                     spark=0.0, curl_amp=0.10, reseed_frac=0.12, base_size=0.0075),
+    "portrait": dict(matte="person", palette="video", fade=0.74, exposure=2.1,
+                     spark=0.0, curl_amp=0.05, reseed_frac=0.16, base_size=0.0045),
     # textured but subject-agnostic (no person model) — colors of whatever's salient/moving
-    "textured": dict(matte="auto", palette="video", fade=0.80, exposure=2.0,
-                     spark=0.05, curl_amp=0.16, reseed_frac=0.11, base_size=0.008),
+    "textured": dict(matte="auto", palette="video", fade=0.76, exposure=2.1,
+                     spark=0.04, curl_amp=0.10, reseed_frac=0.14, base_size=0.005),
     "embers": dict(matte="auto", palette="fire", fade=0.93, exposure=1.6,
                    spark=0.5, curl_amp=0.6, reseed_frac=0.06, base_size=0.012),
     "aurora": dict(matte="motion", palette="aurora", fade=0.92, exposure=1.5,

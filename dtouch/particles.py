@@ -84,13 +84,15 @@ class ParticleFlow:
         fy_grid = (gy / gmag).astype(np.float32)
         z_grid = (dt_in / (dt_in.max() + 1e-6)).astype(np.float32)
 
-        # optical flow (subject motion) on uint8 gray
-        g8 = (np.clip(gray, 0, 1) * 255).astype(np.uint8)
-        if self._prev_gray is not None:
-            flow = cv2.calcOpticalFlowFarneback(self._prev_gray, g8, None,
-                                                0.5, 2, 15, 2, 5, 1.1, 0)
-            flow_x = flow[..., 0].astype(np.float32)
-            flow_y = flow[..., 1].astype(np.float32)
+        # optical flow (subject motion) — computed at HALF resolution (it doesn't need fine
+        # detail) then upscaled, which is ~4x cheaper than full-res Farneback.
+        hw, hh = max(gw // 2, 8), max(gh // 2, 8)
+        g8 = cv2.resize((np.clip(gray, 0, 1) * 255).astype(np.uint8), (hw, hh))
+        if self._prev_gray is not None and self._prev_gray.shape == g8.shape:
+            fl = cv2.calcOpticalFlowFarneback(self._prev_gray, g8, None,
+                                              0.5, 2, 13, 2, 5, 1.1, 0)
+            flow_x = cv2.resize(fl[..., 0], (gw, gh)).astype(np.float32) * (gw / hw)
+            flow_y = cv2.resize(fl[..., 1], (gw, gh)).astype(np.float32) * (gh / hh)
         else:
             flow_x = np.zeros((gh, gw), np.float32); flow_y = np.zeros((gh, gw), np.float32)
         self._prev_gray = g8
