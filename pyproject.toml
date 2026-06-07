@@ -14,10 +14,12 @@ dependencies = [
     "Pillow>=10.0",
     "imageio>=2.34",
     "imageio-ffmpeg>=0.5",
+    "pyobjc-framework-AVFoundation>=10.0; sys_platform == 'darwin'",  # camera selection by name
 ]
 
 [project.optional-dependencies]
 audio = ["sounddevice>=0.4"]
+person = ["mediapipe>=0.10"]   # person matte (selfie segmentation); not needed for the default
 dev = ["pytest>=8.0"]
 
 [tool.setuptools]

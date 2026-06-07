@@ -23,12 +23,106 @@ import numpy as np
 
 from .field import make_grid, displace_z, random_scale, random_euler, pack_instances
 from .render import Renderer
+from .camera import open_camera
+from .matte import make_matte
+from .particles import ParticleFlow
+from .glow import GlowRenderer
 
 
 def _open_capture(device):
     if isinstance(device, int):
         return cv2.VideoCapture(device, cv2.CAP_AVFOUNDATION)
     return cv2.VideoCapture(device)
+
+
+_MATTE_CYCLE = ["auto", "motion", "saliency", "person", "edges"]
+
+
+def live_flow(device="builtin", matte="auto", res=(1280, 720), grid=(256, 144),
+              n=45000, fade=0.90, exposure=1.4, mirror=True, seed=1,
+              show=True, max_frames=None):
+    """Real-time: camera -> subject-agnostic matte -> flowing particle cloud (glow).
+
+    `show=False`/`max_frames=N` is the headless smoke mode used to verify before launching.
+    Returns (frames_processed, last_frame_or_None).
+    """
+    rw, rh = res
+    gw, gh = grid
+    mw, mh = 320, 180  # matte working resolution (cheap)
+
+    cap, cam_name = open_camera(device)
+    matte_kind = matte
+    mat = make_matte(matte_kind)
+    pf = ParticleFlow(n=n, gw=gw, gh=gh, seed=seed)
+    glow = GlowRenderer(rw, rh, n, fade=fade, exposure=exposure)
+
+    win = "dtouch — flow"
+    if show:
+        cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(win, rw, rh)
+
+    frozen = False
+    last_small = None
+    t0 = time.time(); fps = 0.0; count = 0
+    out = None
+    try:
+        while True:
+            if not frozen or last_small is None:
+                ok, frame = cap.read()
+                if not ok:
+                    if max_frames is None:
+                        continue
+                    break
+                if mirror:
+                    frame = cv2.flip(frame, 1)
+                last_small = cv2.resize(frame, (mw, mh))
+            small = last_small
+
+            m = cv2.resize(mat.compute(small), (gw, gh))
+            gray = cv2.resize(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0,
+                              (gw, gh))
+            pf.update(m, gray)
+            out = glow.render(pf.render_data())
+            bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
+
+            count += 1
+            if count % 10 == 0:
+                now = time.time(); fps = 10.0 / (now - t0); t0 = now
+
+            if show:
+                cv2.putText(bgr, f"{fps:4.1f}fps  matte={matte_kind}  cam={cam_name[:18]}  "
+                                 f"fade={glow.fade:.2f} exp={glow.exposure:.1f}",
+                            (12, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (90, 220, 120), 1, cv2.LINE_AA)
+                cv2.putText(bgr, "q quit  n matte  m mirror  [ ] trail  -/= glow  space freeze",
+                            (12, rh - 14), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (80, 180, 110), 1,
+                            cv2.LINE_AA)
+                cv2.imshow(win, bgr)
+                key = cv2.waitKey(1) & 0xFF
+                if key in (ord('q'), 27):
+                    break
+                elif key == ord('n'):
+                    matte_kind = _MATTE_CYCLE[(_MATTE_CYCLE.index(matte_kind) + 1) % len(_MATTE_CYCLE)]
+                    mat = make_matte(matte_kind)
+                elif key == ord('m'):
+                    mirror = not mirror
+                elif key == ord('['):
+                    glow.fade = max(glow.fade - 0.02, 0.5)
+                elif key == ord(']'):
+                    glow.fade = min(glow.fade + 0.02, 0.985)
+                elif key in (ord('-'), ord('_')):
+                    glow.exposure = max(glow.exposure - 0.1, 0.3)
+                elif key in (ord('='), ord('+')):
+                    glow.exposure = min(glow.exposure + 0.1, 4.0)
+                elif key == ord(' '):
+                    frozen = not frozen
+            if max_frames is not None and count >= max_frames:
+                break
+    finally:
+        cap.release()
+        glow.release()
+        if show:
+            cv2.destroyAllWindows(); cv2.waitKey(1)
+    return count, out
 
 
 def live(device=0, grid=(140, 79), res=(1100, 620), depth=1.3, seed=0,
