@@ -35,7 +35,7 @@ def _open_capture(device):
 
 
 def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
-              n=120000, mirror=True, seed=1, preset="abstract", audio=False,
+              n=200000, mirror=True, seed=1, preset="abstract", audio=False,
               panel=True, show=True, max_frames=None):
     rw, rh = res
     gw, gh = grid
@@ -124,6 +124,12 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
                 pf.base_size = ui.dot
                 glow.fade = ui.fade
                 mirror = ui.mirror
+                nw, nh = ui.res_wh
+                if (nw, nh) != (rw, rh):
+                    rw, rh = nw, nh
+                    glow.resize(rw, rh)
+                    cv2.resizeWindow(win, rw, rh)
+                    ui.w, ui.h = rw, rh
                 if ui.audio and mic is None:
                     mic = LiveMic(); mic.start()
                 elif not ui.audio and mic is not None:

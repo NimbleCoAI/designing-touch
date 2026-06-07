@@ -35,8 +35,12 @@ class OverlayUI:
         self.matte_idx = mattes.index(matte) if matte in mattes else 0
         self.palette_idx = palettes.index(palette) if palette in palettes else 0
         self.fade, self.exposure, self.spark, self.curl, self.dot = 0.90, 1.4, 0.35, 0.5, 0.011
-        self.count = 1.0   # fraction of the allocated particles to render
+        self.count = 0.6   # fraction of the allocated particles to render
         self.mirror, self.audio, self.sens, self.record = True, False, 1.0, False
+        self.res_options = [("720p", 1280, 720), ("1080p", 1920, 1080),
+                            ("1440p", 2560, 1440), ("4K", 3840, 2160)]
+        self.res_idx = next((i for i, (_, rw, rh) in enumerate(self.res_options)
+                             if (rw, rh) == (w, h)), 1)
         self.open = True
         self._tooltip = None
         self.pending_preset = None
@@ -48,6 +52,10 @@ class OverlayUI:
         self._flash = 0
         self._flash_rect = None
 
+    @property
+    def res_name(self): return self.res_options[self.res_idx][0]
+    @property
+    def res_wh(self): return self.res_options[self.res_idx][1:3]
     @property
     def matte_name(self): return self.mattes[self.matte_idx]
     @property
@@ -147,7 +155,8 @@ class OverlayUI:
         self._row(frame, "+ Save current look", "save", x, y, cw); y += 34
 
         self._text(frame, "SOURCE", x, y, DIM, 0.4); y += 6
-        y = self._cycle(frame, "matte", self.matte_name, "matte", x, y, cw) + 6
+        y = self._cycle(frame, "matte", self.matte_name, "matte", x, y, cw) + 2
+        y = self._cycle(frame, "output", self.res_name, "res", x, y, cw) + 6
 
         self._text(frame, "LOOK", x, y, DIM, 0.4); y += 6
         y = self._cycle(frame, "color", self.palette_name, "color", x, y, cw) + 4
@@ -231,6 +240,8 @@ class OverlayUI:
                 self.matte_idx = (self.matte_idx + d) % len(self.mattes)
             elif key == "color":
                 self.palette_idx = (self.palette_idx + d) % len(self.palettes)
+            elif key == "res":
+                self.res_idx = (self.res_idx + d) % len(self.res_options)
         elif kind == "slider":
             attr, x0, x1, lo, hi = payload
             self._drag = payload
