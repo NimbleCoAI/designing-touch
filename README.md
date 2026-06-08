@@ -1,13 +1,14 @@
 # designing-touch
 
 Turn **video and sound into flowing particle visuals**, in real time — a modular,
-code-first take on the kind of generative effects you'd build in TouchDesigner, but driven
-from a terminal or a simple control panel instead of a GUI node graph.
+code-first take on the kind of generative effects you'd build in TouchDesigner, but driven from a terminal or a simple control panel instead of a GUI node graph.
 
-Point your webcam at yourself and you dissolve into a luminous, flowing cloud of particles.
+Point your webcam at yourself and you dissolve into a luminous, flowing cloud of particles. Customisable and genuinely fun.
+
 Dance, play music, and it moves with you.
 
-![sigil](docs/05-flow-person.png)
+<img width="1600" height="894" alt="image" src="https://github.com/user-attachments/assets/0f4a036a-ab8a-445a-9d43-00d871481a93" />
+
 
 ## Quick start
 
