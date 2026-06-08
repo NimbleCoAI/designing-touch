@@ -41,8 +41,8 @@ def _bilinear(grid, x, y, gw, gh):
 
 class ParticleFlow:
     def __init__(self, n=40000, gw=256, gh=144, seed=0, tint=(0.45, 0.72, 1.0),
-                 K=0.20, attract_speed=4.5, drift_inside=0.15, pull_falloff=22.0,
-                 flow_gain=0.6, curl_amp=0.5, damp=0.90, reseed_sdf=-22.0,
+                 K=0.20, attract_speed=4.5, pull_falloff=22.0,
+                 flow_gain=0.6, curl_amp=0.5, damp=0.90,
                  reseed_frac=0.06, base_size=0.011, speed_ref=4.0, spark=0.35):
         self.n, self.gw, self.gh = n, gw, gh
         rng = np.random.default_rng(seed)
@@ -52,9 +52,9 @@ class ParticleFlow:
         self.vy = np.zeros(n, np.float32)
         self.tint = np.array(tint, np.float32)
         # params
-        self.K, self.attract_speed, self.drift_inside = K, attract_speed, drift_inside
+        self.K, self.attract_speed = K, attract_speed
         self.pull_falloff, self.flow_gain, self.curl_amp = pull_falloff, flow_gain, curl_amp
-        self.damp, self.reseed_sdf, self.reseed_frac = damp, reseed_sdf, reseed_frac
+        self.damp, self.reseed_frac = damp, reseed_frac
         self.base_size, self.speed_ref = base_size, speed_ref
         self.spark = spark
         self.palette = "ice"
