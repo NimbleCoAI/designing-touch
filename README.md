@@ -1,67 +1,75 @@
 # designing-touch
 
-Experiments in recreating features of [TouchDesigner](https://derivative.ca/) — the node-based,
-real-time visual programming environment — as a **modular engine that can be built, run, and
-iterated on by Claude Code** from a terminal.
+Turn **video and sound into flowing particle visuals**, in real time — a modular,
+code-first take on the kind of generative effects you'd build in TouchDesigner, but driven
+from a terminal or a simple control panel instead of a GUI node graph.
 
-## Why
+Point your webcam at yourself and you dissolve into a luminous, flowing cloud of particles.
+Dance, play music, and it moves with you.
 
-TouchDesigner is GUI-first: you wire operators (TOPs, CHOPs, SOPs) on a canvas. That's hard for
-an agent to drive. This repo inverts it: **express the same primitives as code** — composable,
-text-first, version-controlled, and headless — so an agent can author effects, render them, and
-*verify the result itself* without a display or device permissions.
+![sigil](docs/05-flow-person.png)
 
-That last property is the whole point. See **[docs/autonomy-pattern.md](docs/autonomy-pattern.md)**
-for the self-verifying loop the repo is built around.
+## Quick start
 
-## The engine: `dtouch/`
+```bash
+git clone https://github.com/NimbleCoAI/designing-touch
+cd designing-touch
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[person]"        # engine + person segmentation
+python experiments/05-live-webcam/run.py
+```
 
-A small Python package of GPU/NumPy operators plus a node-graph-as-code spine:
+On macOS you can also just **double-click `start.command`** (it sets up the environment on first
+run, then opens the window). Grant your terminal **Camera** (and **Microphone**, for sound) access
+in System Settings → Privacy & Security.
 
-| Module             | Role (TouchDesigner analog)                                   |
-|--------------------|---------------------------------------------------------------|
-| `dtouch.sources`   | TOP — synthetic / image / webcam / video luminance sources    |
-| `dtouch.field`     | TOP→POP — grid, luminance displacement, seeded randoms, packing |
-| `dtouch.render`    | Copy SOP + Light + Camera — headless instanced GPU renderer    |
-| `dtouch.audio`     | CHOP — audio file/mic → amplitude + frequency bands            |
-| `dtouch.fluid`     | GPU stable-fluids velocity field (advection)                   |
-| `dtouch.matte`     | subject-agnostic interest field (motion / saliency / edges / person) |
-| `dtouch.particles` | flowing particle cloud that fills a matte (optical flow + curl) |
-| `dtouch.glow`      | additive glowing-particle renderer with trail feedback        |
-| `dtouch.camera`    | pick the built-in camera by name (macOS Continuity-safe)      |
-| `dtouch.pipeline`  | `Op` / `Graph` — wire operators by threading a context dict    |
+## The live instrument
+
+One window: the live render plus a collapsible control panel (click the `>` to fold it away).
+
+- **Templates** — one-click looks: `abstract` (glowing cloud), `portrait`/`textured`
+  (recognizable, painted with your real colors), `embers`, `aurora`, and **`sigil`** (sharp
+  fractal contour lines — move, then hold still and watch them form). Save your own with
+  "Save current look".
+- **Source** — `matte` (what becomes particles: motion / saliency / person / edges / luma),
+  `output` resolution (720p → 4K).
+- **Look** — color palette + sliders for Trails, Glow, Spark, Flow, Size, Count, and the sigil
+  knobs Glide / Pull / Reseed. Every slider has an `i` tooltip.
+- **Audio** — toggle sound reactivity (bass pulses brightness; treble adds spark where Spark > 0)
+  and a sensitivity slider.
+- **Record** — capture an MP4 of your session.
+
+Quit via the **Quit** button, `q`, or the window's close box.
+
+## The engine (`dtouch/`)
+
+A small package of composable operators — sources, mattes, a particle-flow simulation, GPU glow
+renderer, a 2D stable-fluids solver, audio analysis, and a tiny node-graph spine. Rendering is
+headless (moderngl) so everything is scriptable and inspectable. See **[AGENTS.md](AGENTS.md)** for
+the architecture and how to extend it, and **[docs/autonomy-pattern.md](docs/autonomy-pattern.md)**
+for the self-verifying design philosophy.
 
 ## Experiments
 
-| #  | Experiment        | TouchDesigner feature ported                          |
-|----|-------------------|-------------------------------------------------------|
-| 01 | displacement      | TOP→POP, displace by luminance, instanced boxes, light/depth |
-| 02 | shadows           | + depth-from-light shadow map                          |
-| 03 | audio-reactive    | CHOP → modulate displacement/scale by sound            |
-| 04 | fluid             | stable-fluids advection of the particle field          |
-| 05 | live-webcam       | **real-time interactive** camera → flowing glowing particle cloud of whatever's in frame |
+Standalone studies, each in `experiments/NN-name/` with its own README and `run.py`:
 
-Each `experiments/NN-name/` has its own README and a `run.py` CLI; a sample frame is committed
-under `docs/`.
-
-## Quickstart
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e .                      # installs the dtouch engine + deps
-
-cd experiments/01-displacement
-python run.py --frames 90             # synthetic source, no camera needed
-python run.py --source webcam         # live (grant terminal Camera permission first)
-```
-
-Outputs land in each experiment's `out/` (`*.mp4` + `*_frame0.png`).
+| #  | Experiment        | What it explores                                        |
+|----|-------------------|---------------------------------------------------------|
+| 01 | displacement      | luminance displacement, instanced boxes, light/depth    |
+| 02 | shadows           | depth-from-light shadow mapping                          |
+| 03 | audio-reactive    | sound → displacement                                     |
+| 04 | fluid             | stable-fluids advection of a particle field             |
+| 05 | live-webcam       | the real-time interactive instrument (above)            |
 
 ## Tests
 
 ```bash
-pytest tests/ -q          # engine: deterministic transforms + graph + render smoke test
+pytest tests/ -q
 ```
 
-Verified on Apple Silicon (M4 Max, Metal-backed GL 4.1). Requires a GPU/GL context for the
-render smoke test.
+Verified on Apple Silicon (Metal-backed GL 4.1). The render tests need a GPU/GL context.
+
+## License
+
+[GNU AGPL-3.0](LICENSE). If you run a modified version as a network service, you must offer users
+its source. Contributions welcome — see [AGENTS.md](AGENTS.md).

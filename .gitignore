@@ -10,3 +10,5 @@ __pycache__/
 dtouch/assets/*.tflite
 presets.json
 **/presets.json
+dtouch.egg-info/
+*.egg-info/
