@@ -33,7 +33,9 @@ One window: the live render plus a collapsible control panel (click the `>` to f
   fractal contour lines — move, then hold still and watch them form). Save your own with
   "Save current look".
 - **Source** — `matte` (what becomes particles: motion / saliency / person / edges / luma),
-  `output` resolution (720p → 4K).
+  `output` resolution (720p → 4K), and **Video bg** — show the raw camera footage behind the
+  particles (screen-blended so the glow stays on top), with a `Vid mix` slider for how present
+  it is. Recordings capture it too.
 - **Look** — color palette + sliders for Trails, Glow, Spark, Flow, Size, Count, and the sigil
   knobs Glide / Pull / Reseed. Every slider has an `i` tooltip.
 - **Audio** — toggle sound reactivity (bass pulses brightness; treble adds spark where Spark > 0)

@@ -38,12 +38,16 @@ class OverlayUI:
         self.damp, self.pull, self.reseed = 0.90, 22.0, 0.06   # motion physics (sigil knobs)
         self.count = 0.75   # fraction of the allocated particles to render
         self.mirror, self.audio, self.sens, self.record = True, False, 1.0, False
+        self.video_bg, self.video_mix = False, 0.5   # raw footage behind the particles
         self.res_options = [("720p", 1280, 720), ("1080p", 1920, 1080),
                             ("1440p", 2560, 1440), ("4K", 3840, 2160)]
         self.res_idx = next((i for i, (_, rw, rh) in enumerate(self.res_options)
                              if (rw, rh) == (w, h)), 1)
         self.open = True
         self.quit = False
+        self.scroll = 0          # panel scroll offset (px) — content taller than the window
+        self._content_h = 0      # measured column height from the last draw
+        self._scroll_drag = None
         self._tooltip = None
         self.pending_preset = None
         self.pending_save = False
@@ -145,12 +149,11 @@ class OverlayUI:
         ov = frame.copy()
         cv2.rectangle(ov, (px, 0), (w, h), PANEL, -1)
         cv2.addWeighted(ov, 0.86, frame, 0.14, 0, frame)
-        x, cw, y = px + 16, self.panel_w - 32, 30
+        # the column can be taller than the window (e.g. 720p) — scroll, clamped so it's
+        # a no-op when everything fits. content height comes from the previous draw.
+        self.scroll = min(max(self.scroll, 0), max(0, self._content_h - h))
+        x, cw, y = px + 16, self.panel_w - 32, 30 - self.scroll
         self._text(frame, "dtouch", x, y, ACC, 0.62, 2)
-        cr = (w - 40, 12, w - 12, 36)
-        self._box(frame, cr, HOVER if _in(cr, self.mouse) else BTN)
-        self._text(frame, ">", w - 33, 30, INK, 0.55, 2)
-        self._hot.append((cr, "collapse", None))
         y += 16
 
         self._text(frame, "TEMPLATES", x, y, DIM, 0.4); y += 8
@@ -161,7 +164,11 @@ class OverlayUI:
 
         self._text(frame, "SOURCE", x, y, DIM, 0.4); y += 6
         y = self._cycle(frame, "matte", self.matte_name, "matte", x, y, cw) + 2
-        y = self._cycle(frame, "output", self.res_name, "res", x, y, cw) + 6
+        y = self._cycle(frame, "output", self.res_name, "res", x, y, cw) + 2
+        self._row(frame, "Video bg: " + ("ON" if self.video_bg else "off"),
+                  "video_bg", x, y, cw, active=self.video_bg); y += 28
+        y = self._slider(frame, "Vid mix", "video_mix", x, y, cw,
+                         "How visible the raw camera footage is behind the particles.") + 6
 
         self._text(frame, "LOOK", x, y, DIM, 0.4); y += 6
         y = self._cycle(frame, "color", self.palette_name, "color", x, y, cw) + 4
@@ -178,6 +185,17 @@ class OverlayUI:
         self._row(frame, "Mirror: " + ("on" if self.mirror else "off"),
                   "mirror", x, y, cw, active=self.mirror); y += 32
         self._row(frame, "Quit", "quit", x, y, cw)
+        self._content_h = y + self.scroll + 36   # column bottom incl. margin, unscrolled
+
+        # collapse button drawn last so it stays fixed and clickable above scrolled content
+        cr = (w - 40, 12, w - 12, 36)
+        self._box(frame, cr, HOVER if _in(cr, self.mouse) else BTN)
+        self._text(frame, ">", w - 33, 30, INK, 0.55, 2)
+        self._hot.append((cr, "collapse", None))
+        if self._content_h > h:   # slim scrollbar on the panel's left edge
+            bar_h = max(int(h * h / self._content_h), 30)
+            by = int((h - bar_h) * (self.scroll / max(self._content_h - h, 1)))
+            cv2.rectangle(frame, (px + 2, by), (px + 5, by + bar_h), TRACK, -1)
 
         # click feedback: flash the last-clicked control
         if self._flash > 0 and self._flash_rect is not None:
@@ -227,12 +245,21 @@ class OverlayUI:
                     self._flash_rect, self._flash = rect, 4
                     self._activate(kind, payload, x)
                     return
-        elif event == cv2.EVENT_MOUSEMOVE and (flags & cv2.EVENT_FLAG_LBUTTON) and self._drag:
-            attr, x0, x1, lo, hi = self._drag
-            t = min(max((x - x0) / max(x1 - x0, 1), 0.0), 1.0)
-            setattr(self, attr, lo + t * (hi - lo))
+            if self.open and x >= self.w - self.panel_w:
+                self._scroll_drag = (y, self.scroll)   # empty panel area: drag to scroll
+        elif event == cv2.EVENT_MOUSEWHEEL and self.open:
+            self.scroll += -40 if flags > 0 else 40    # flags>0 = wheel up (clamped in draw)
+        elif event == cv2.EVENT_MOUSEMOVE and (flags & cv2.EVENT_FLAG_LBUTTON):
+            if self._drag:
+                attr, x0, x1, lo, hi = self._drag
+                t = min(max((x - x0) / max(x1 - x0, 1), 0.0), 1.0)
+                setattr(self, attr, lo + t * (hi - lo))
+            elif self._scroll_drag:
+                y0, s0 = self._scroll_drag
+                self.scroll = s0 + (y0 - y)
         elif event == cv2.EVENT_LBUTTONUP:
             self._drag = None
+            self._scroll_drag = None
 
     def _activate(self, kind, payload, x):
         if kind == "collapse":
@@ -259,6 +286,8 @@ class OverlayUI:
             self.record = not self.record
         elif kind == "mirror":
             self.mirror = not self.mirror
+        elif kind == "video_bg":
+            self.video_bg = not self.video_bg
         elif kind == "save":
             self.pending_save = True
         elif kind == "quit":
@@ -269,6 +298,7 @@ _RANGES = {
     "fade": (0.50, 0.985), "exposure": (0.3, 4.0), "spark": (0.0, 1.0),
     "curl": (0.0, 1.0), "dot": (0.004, 0.020), "sens": (0.0, 3.0),
     "count": (0.1, 1.0), "damp": (0.82, 0.985), "pull": (8.0, 40.0), "reseed": (0.005, 0.15),
+    "video_mix": (0.05, 1.0),
 }
 
 _SLIDERS = [
