@@ -107,6 +107,14 @@ def step(pos, vel, p):
     return pos, vel
 
 
+SHAPES = ["cube", "star", "bird"]
+
+
+def _xstretch(shape):
+    """Cubes get a motion-streak along the heading; stars/birds keep their proportions."""
+    return 1.8 if shape == "cube" else 1.0
+
+
 MOODS = {
     "1 murmuration": dict(cohesion=0.7, alignment=1.5, separation=1.6, swirl=0.10, neighbor=0.5),
     "2 scatter":     dict(cohesion=0.3, alignment=0.8, separation=2.6, swirl=0.05, neighbor=0.4),
@@ -127,7 +135,7 @@ def live(p):
     pos = rng.normal(0.0, 0.5, size=(n, 3)).astype(np.float32)
     vel = _normalize(rng.normal(0.0, 1.0, size=(n, 3)).astype(np.float32)) * p.min_speed
     base_size = 1.4 / np.sqrt(n)
-    renderer = Renderer(rw, rh, n, base_size=base_size, depth_scale=1.0, extent=1.7)
+    renderer = Renderer(rw, rh, n, base_size=base_size, depth_scale=1.0, extent=1.7, geometry=p.shape)
     p.recenter = True
     p._attractor = None
     p._attract_sign = 1.0
@@ -167,7 +175,7 @@ def live(p):
 
         speed = np.linalg.norm(vel, axis=1, keepdims=True)
         s = np.repeat(0.7 + 1.6 * (speed / p.max_speed), 3, axis=1).astype(np.float32)
-        s[:, 0] *= 1.8
+        s[:, 0] *= _xstretch(p.shape)
         euler = heading_to_euler(vel)
         frame = renderer.render(pack_instances(pos.astype(np.float32), s, euler))
         frame = np.ascontiguousarray(frame[:, :, ::-1])  # RGB -> BGR for cv2
@@ -176,15 +184,22 @@ def live(p):
             lines = [
                 "flocking  ·  drag=attract  right-drag=scatter  space=freeze  h=hud  q=quit",
                 f"[c/C] cohesion {p.cohesion:.2f}   [a/A] alignment {p.alignment:.2f}   [s/S] separation {p.separation:.2f}",
-                f"[w/W] swirl {p.swirl:.2f}   [1] murmuration  [2] scatter  [3] vortex   [r] reset   boids {n}",
+                f"[w/W] swirl {p.swirl:.2f}   [g] shape: {p.shape}   [1/2/3] moods   [r] reset   boids {n}",
             ]
             for i, t in enumerate(lines):
                 cv2.putText(frame, t, (14, 26 + i * 24), cv2.FONT_HERSHEY_SIMPLEX,
                             0.5, (255, 255, 255), 1, cv2.LINE_AA)
 
         cv2.imshow(win, frame)
+        # quit if the window was closed via the title bar / window manager (macOS often
+        # renders no close button — this makes closing the window actually stop the loop)
+        if cv2.getWindowProperty(win, cv2.WND_PROP_VISIBLE) < 1:
+            break
         k = cv2.waitKey(1) & 0xFF
         if k == ord("q") or k == 27: break
+        elif k == ord("g"):
+            p.shape = SHAPES[(SHAPES.index(p.shape) + 1) % len(SHAPES)]
+            renderer.set_geometry(p.shape)
         elif k == ord("c"): p.cohesion = max(0.0, p.cohesion - 0.05)
         elif k == ord("C"): p.cohesion += 0.05
         elif k == ord("a"): p.alignment = max(0.0, p.alignment - 0.05)
@@ -229,6 +244,8 @@ def main():
                     help="real-time interactive instrument (window + key/mouse controls)")
     ap.add_argument("--attract-strength", type=float, default=2.2,
                     help="pull/push strength of the mouse hand in --live")
+    ap.add_argument("--shape", default="cube", choices=SHAPES,
+                    help="instance geometry: cube | star (Matariki ✦) | bird")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "out", "flock.mp4"))
     p = ap.parse_args()
 
@@ -245,7 +262,7 @@ def main():
     vel = _normalize(rng.normal(0.0, 1.0, size=(n, 3)).astype(np.float32)) * p.min_speed
 
     base_size = 1.4 / np.sqrt(n)            # cube size shrinks as the shoal grows
-    renderer = Renderer(rw, rh, n, base_size=base_size, depth_scale=1.0, extent=1.7)
+    renderer = Renderer(rw, rh, n, base_size=base_size, depth_scale=1.0, extent=1.7, geometry=p.shape)
 
     writer = imageio.get_writer(p.out, fps=p.fps, macro_block_size=8)
     png_path = os.path.splitext(p.out)[0] + "_frame0.png"
@@ -256,7 +273,7 @@ def main():
         speed = np.linalg.norm(vel, axis=1, keepdims=True)
         # length-stretch along heading via per-axis scale: faster boids read longer
         s = np.repeat(0.7 + 1.6 * (speed / p.max_speed), 3, axis=1).astype(np.float32)
-        s[:, 0] *= 1.8                       # elongate the leading axis
+        s[:, 0] *= _xstretch(p.shape)                       # elongate the leading axis
         euler = heading_to_euler(vel)
         frame = renderer.render(pack_instances(pos.astype(np.float32), s, euler))
         writer.append_data(frame)
