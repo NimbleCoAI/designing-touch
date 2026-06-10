@@ -87,8 +87,17 @@ def step(pos, vel, p):
     r = np.linalg.norm(pos, axis=1, keepdims=True)
     inward = -_normalize(pos) * np.maximum(0.0, r - p.bound) * 2.5
 
+    # interactive attractor/repulsor (live mode): the cursor as a hand in the field
+    attract = 0.0
+    att = getattr(p, "_attractor", None)
+    if att is not None:
+        to = np.zeros((n, 3), dtype=np.float32)
+        to[:, 0] = att[0] - pos[:, 0]
+        to[:, 1] = att[1] - pos[:, 1]
+        attract = _normalize(to) * (getattr(p, "_attract_sign", 1.0) * p.attract_strength)
+
     acc = (p.cohesion * cohesion + p.alignment * alignment +
-           p.separation * separation + swirl + inward)
+           p.separation * separation + swirl + inward + attract)
     vel = _limit(vel + acc * p.dt, p.max_speed)
     vel = np.where(np.linalg.norm(vel, axis=1, keepdims=True) < p.min_speed,
                    _normalize(vel) * p.min_speed, vel)
@@ -96,6 +105,105 @@ def step(pos, vel, p):
     if p.recenter:
         pos = pos - pos.mean(axis=0, keepdims=True)  # camera tracks the shoal's centroid
     return pos, vel
+
+
+MOODS = {
+    "1 murmuration": dict(cohesion=0.7, alignment=1.5, separation=1.6, swirl=0.10, neighbor=0.5),
+    "2 scatter":     dict(cohesion=0.3, alignment=0.8, separation=2.6, swirl=0.05, neighbor=0.4),
+    "3 vortex":      dict(cohesion=0.55, alignment=1.2, separation=1.7, swirl=0.55, neighbor=0.45),
+}
+
+
+def live(p):
+    """Real-time interactive flocking instrument. A new base mode for designing-touch:
+    self-driving boids instead of a video-driven matte. Keys tune the three Reynolds
+    forces + the swirl live; the mouse is a hand in the field (drag to attract, right-drag
+    to scatter). Emergent order you can push around."""
+    import cv2
+
+    rw, rh = (int(x) for x in p.res.lower().split("x"))
+    n = p.boids
+    rng = np.random.default_rng(p.seed)
+    pos = rng.normal(0.0, 0.5, size=(n, 3)).astype(np.float32)
+    vel = _normalize(rng.normal(0.0, 1.0, size=(n, 3)).astype(np.float32)) * p.min_speed
+    base_size = 1.4 / np.sqrt(n)
+    renderer = Renderer(rw, rh, n, base_size=base_size, depth_scale=1.0, extent=1.7)
+    p.recenter = True
+    p._attractor = None
+    p._attract_sign = 1.0
+    extent = 1.7
+
+    win = "designing-touch · flocking"
+    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(win, rw, rh)
+
+    state = {"mx": rw // 2, "my": rh // 2, "down": 0, "hud": True, "freeze": False}
+
+    def on_mouse(event, x, y, flags, _):
+        state["mx"], state["my"] = x, y
+        if event == cv2.EVENT_LBUTTONDOWN: state["down"] = 1     # attract
+        elif event == cv2.EVENT_RBUTTONDOWN: state["down"] = -1  # repel
+        elif event in (cv2.EVENT_LBUTTONUP, cv2.EVENT_RBUTTONUP): state["down"] = 0
+    cv2.setMouseCallback(win, on_mouse)
+
+    def screen_to_world(mx, my):
+        wx = (mx / rw - 0.5) * 2.0 * extent
+        wy = -(my / rh - 0.5) * 2.0 * extent
+        return (wx, wy)
+
+    def apply_mood(name):
+        for k, v in MOODS[name].items():
+            setattr(p, k.replace("-", "_"), v)
+
+    while True:
+        if state["down"] != 0:
+            p._attractor = screen_to_world(state["mx"], state["my"])
+            p._attract_sign = float(state["down"])
+        else:
+            p._attractor = None
+
+        if not state["freeze"]:
+            pos, vel = step(pos, vel, p)
+
+        speed = np.linalg.norm(vel, axis=1, keepdims=True)
+        s = np.repeat(0.7 + 1.6 * (speed / p.max_speed), 3, axis=1).astype(np.float32)
+        s[:, 0] *= 1.8
+        euler = heading_to_euler(vel)
+        frame = renderer.render(pack_instances(pos.astype(np.float32), s, euler))
+        frame = np.ascontiguousarray(frame[:, :, ::-1])  # RGB -> BGR for cv2
+
+        if state["hud"]:
+            lines = [
+                "flocking  ·  drag=attract  right-drag=scatter  space=freeze  h=hud  q=quit",
+                f"[c/C] cohesion {p.cohesion:.2f}   [a/A] alignment {p.alignment:.2f}   [s/S] separation {p.separation:.2f}",
+                f"[w/W] swirl {p.swirl:.2f}   [1] murmuration  [2] scatter  [3] vortex   [r] reset   boids {n}",
+            ]
+            for i, t in enumerate(lines):
+                cv2.putText(frame, t, (14, 26 + i * 24), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+        cv2.imshow(win, frame)
+        k = cv2.waitKey(1) & 0xFF
+        if k == ord("q") or k == 27: break
+        elif k == ord("c"): p.cohesion = max(0.0, p.cohesion - 0.05)
+        elif k == ord("C"): p.cohesion += 0.05
+        elif k == ord("a"): p.alignment = max(0.0, p.alignment - 0.05)
+        elif k == ord("A"): p.alignment += 0.05
+        elif k == ord("s"): p.separation = max(0.0, p.separation - 0.05)
+        elif k == ord("S"): p.separation += 0.05
+        elif k == ord("w"): p.swirl = max(0.0, p.swirl - 0.02)
+        elif k == ord("W"): p.swirl += 0.02
+        elif k == ord("1"): apply_mood("1 murmuration")
+        elif k == ord("2"): apply_mood("2 scatter")
+        elif k == ord("3"): apply_mood("3 vortex")
+        elif k == ord("h"): state["hud"] = not state["hud"]
+        elif k == ord(" "): state["freeze"] = not state["freeze"]
+        elif k == ord("r"):
+            pos = rng.normal(0.0, 0.5, size=(n, 3)).astype(np.float32)
+            vel = _normalize(rng.normal(0.0, 1.0, size=(n, 3)).astype(np.float32)) * p.min_speed
+
+    renderer.release()
+    cv2.destroyAllWindows()
 
 
 def main():
@@ -117,8 +225,16 @@ def main():
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--recenter", action=argparse.BooleanOptionalAction, default=True,
                     help="keep the shoal centroid framed (camera tracks it)")
+    ap.add_argument("--live", action="store_true",
+                    help="real-time interactive instrument (window + key/mouse controls)")
+    ap.add_argument("--attract-strength", type=float, default=2.2,
+                    help="pull/push strength of the mouse hand in --live")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "out", "flock.mp4"))
     p = ap.parse_args()
+
+    if p.live:
+        live(p)
+        return
 
     rw, rh = (int(x) for x in p.res.lower().split("x"))
     n = p.boids

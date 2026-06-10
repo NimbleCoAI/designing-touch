@@ -20,10 +20,34 @@ than a drifting cloud.
 It is the simplest honest picture of a polycentric system: order that is *grown* from
 local interaction, not imposed from a center. Many centers, not one.
 
-## Run
+## Live instrument (`--live`)
+
+A new base mode for designing-touch: instead of a video-driven matte, the picture drives
+*itself* — self-organising boids you can push around. Open a real-time window and play:
 
 ```bash
-python experiments/06-flocking/run.py                       # 700 boids, 240 frames
+python experiments/06-flocking/run.py --live                # ~700 boids, interactive
+python experiments/06-flocking/run.py --live --boids 400    # fewer = smoother on a laptop
+```
+
+| Control | Effect |
+|---------|--------|
+| **drag** (left) | a hand in the field — the flock is **attracted** to the cursor |
+| **right-drag** | the flock **scatters** from the cursor |
+| `c` / `C` | cohesion − / + |
+| `a` / `A` | alignment − / + |
+| `s` / `S` | separation − / + |
+| `w` / `W` | swirl − / + |
+| `1` `2` `3` | mood presets: murmuration · scatter · vortex |
+| `space` | freeze · `r` reset · `h` toggle HUD · `q` quit |
+
+The forces fight each other; the interesting looks live on the edges between them. Drag the
+flock into a wall, let go, watch it reorganise.
+
+## Render to file
+
+```bash
+python experiments/06-flocking/run.py                       # 700 boids, 240 frames -> mp4
 python experiments/06-flocking/run.py --boids 1200 --frames 600
 python experiments/06-flocking/run.py --cohesion 0.4 --separation 2.4   # looser, more lanes
 python experiments/06-flocking/run.py --no-recenter         # let the shoal wander out of frame
