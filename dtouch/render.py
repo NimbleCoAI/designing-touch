@@ -55,6 +55,54 @@ def _unit_cube() -> np.ndarray:
     return np.array(verts, dtype=np.float32)
 
 
+def _mesh_from_tris(tris) -> np.ndarray:
+    """Interleaved pos(3)+normal(3) array from triangles (each a triple of xyz points),
+    one flat face-normal per triangle."""
+    out = []
+    for a, b, c in tris:
+        a, b, c = (np.asarray(p, dtype=np.float64) for p in (a, b, c))
+        n = np.cross(b - a, c - a)
+        ln = np.linalg.norm(n)
+        n = (n / ln) if ln > 1e-9 else np.array([0.0, 0.0, 1.0])
+        for p in (a, b, c):
+            out.append([float(p[0]), float(p[1]), float(p[2]), *n])
+    return np.array(out, dtype=np.float32)
+
+
+def _star5(outer=0.62, inner=0.25, h=0.3) -> np.ndarray:
+    """A 3D 5-pointed star (shallow bipyramid) — catches the directional light and
+    twinkles as it tumbles. Matariki-friendly. ✦"""
+    import math
+    perim = []
+    for k in range(10):
+        ang = math.pi / 2 + k * math.pi / 5          # top point, 36 deg steps
+        r = outer if k % 2 == 0 else inner
+        perim.append((r * math.cos(ang), r * math.sin(ang), 0.0))
+    apex_f, apex_b = (0.0, 0.0, h), (0.0, 0.0, -h)
+    tris = []
+    for i in range(10):
+        p, q = perim[i], perim[(i + 1) % 10]
+        tris.append((apex_f, p, q))                  # front pyramid
+        tris.append((apex_b, q, p))                  # back pyramid (reversed winding)
+    return _mesh_from_tris(tris)
+
+
+def _bird(span=0.6, length=0.7, dihedral=0.12) -> np.ndarray:
+    """A crude swept-wing bird pointing +X (the heading axis). Double-sided delta."""
+    nose = (length, 0.0, 0.0)
+    tail = (-length * 0.5, 0.0, 0.0)
+    lw = (-length * 0.15, span, dihedral)
+    rw = (-length * 0.15, -span, dihedral)
+    tris = [
+        (nose, lw, tail), (nose, tail, rw),          # top
+        (nose, tail, lw), (nose, rw, tail),          # bottom (double-sided)
+    ]
+    return _mesh_from_tris(tris)
+
+
+GEOMETRIES = {"cube": _unit_cube, "star": _star5, "bird": _bird}
+
+
 VERTEX_SHADER = """
 #version 330
 uniform mat4 u_mvp;
@@ -100,19 +148,16 @@ void main() {
 
 class Renderer:
     def __init__(self, width: int, height: int, n_instances: int,
-                 base_size: float, depth_scale: float = 1.2, extent: float = 2.0):
+                 base_size: float, depth_scale: float = 1.2, extent: float = 2.0,
+                 geometry: str = "cube"):
         self.width, self.height, self.n = width, height, n_instances
         self.ctx = moderngl.create_standalone_context()
         self.ctx.enable(moderngl.DEPTH_TEST | moderngl.CULL_FACE)
 
         self.prog = self.ctx.program(vertex_shader=VERTEX_SHADER, fragment_shader=FRAGMENT_SHADER)
-        cube = _unit_cube()
-        self.cube_vbo = self.ctx.buffer(cube.tobytes())
         self.inst_vbo = self.ctx.buffer(reserve=n_instances * 9 * 4, dynamic=True)
-        self.vao = self.ctx.vertex_array(self.prog, [
-            (self.cube_vbo, "3f 3f", "in_pos", "in_normal"),
-            (self.inst_vbo, "3f 3f 3f/i", "i_offset", "i_scale", "i_euler"),
-        ])
+        self.geo_vbo = None
+        self.set_geometry(geometry)
 
         color = self.ctx.texture((width, height), 4)
         depth = self.ctx.depth_texture((width, height))
@@ -127,6 +172,19 @@ class Renderer:
         self.prog["u_base_size"].value = float(base_size)
         ld = np.array([0.4, -0.5, 1.0], dtype=np.float32); ld /= np.linalg.norm(ld)
         self.prog["u_light_dir"].value = tuple(float(x) for x in ld)
+
+    def set_geometry(self, name: str):
+        """Swap the instanced primitive (cube/star/bird) — rebuilds the geometry buffer
+        and the VAO, reusing the context/program/fbo. Safe to call live."""
+        mesh = GEOMETRIES.get(name, _unit_cube)()
+        if self.geo_vbo is not None:
+            self.geo_vbo.release()
+        self.geo_vbo = self.ctx.buffer(mesh.tobytes())
+        self.geometry = name
+        self.vao = self.ctx.vertex_array(self.prog, [
+            (self.geo_vbo, "3f 3f", "in_pos", "in_normal"),
+            (self.inst_vbo, "3f 3f 3f/i", "i_offset", "i_scale", "i_euler"),
+        ])
 
     def render(self, instance_buf: np.ndarray) -> np.ndarray:
         self.inst_vbo.write(instance_buf.astype("f4").tobytes())

@@ -39,7 +39,18 @@ python experiments/06-flocking/run.py --live --boids 400    # fewer = smoother o
 | `s` / `S` | separation − / + |
 | `w` / `W` | swirl − / + |
 | `1` `2` `3` | mood presets: murmuration · scatter · vortex |
-| `space` | freeze · `r` reset · `h` toggle HUD · `q` quit |
+| `g` | cycle shape: cube → **star ✦** → bird |
+| `space` | freeze · `r` reset · `h` toggle HUD · `q` quit (or just close the window) |
+
+Launch straight into stars (Matariki):
+
+```bash
+python experiments/06-flocking/run.py --live --shape star
+```
+
+Shapes: `cube` (the original, with a motion-streak), `star` (a 3D 5-pointed star that
+twinkles as it tumbles — a flock of stars), `bird` (a crude swept-wing delta that points
+where it flies). Set with `--shape` or cycle live with `g`.
 
 The forces fight each other; the interesting looks live on the edges between them. Drag the
 flock into a wall, let go, watch it reorganise.
