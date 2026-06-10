@@ -128,6 +128,7 @@ def live(p):
     forces + the swirl live; the mouse is a hand in the field (drag to attract, right-drag
     to scatter). Emergent order you can push around."""
     import cv2
+    import signal as _signal
 
     rw, rh = (int(x) for x in p.res.lower().split("x"))
     n = p.boids
@@ -145,7 +146,18 @@ def live(p):
     cv2.namedWindow(win, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(win, rw, rh)
 
-    state = {"mx": rw // 2, "my": rh // 2, "down": 0, "hud": True, "freeze": False}
+    state = {"mx": rw // 2, "my": rh // 2, "down": 0, "hud": True, "freeze": False, "quit": False}
+
+    # Make the window actually closable: macOS cv2 windows often render no close button
+    # and 'q' needs window focus, so a backgrounded launch can trap the user. Catch
+    # SIGTERM (dock Quit) and SIGINT (Ctrl-C) and break the loop cleanly.
+    def _on_sig(*_a):
+        state["quit"] = True
+    for _sig in (_signal.SIGTERM, _signal.SIGINT):
+        try:
+            _signal.signal(_sig, _on_sig)
+        except Exception:
+            pass
 
     def on_mouse(event, x, y, flags, _):
         state["mx"], state["my"] = x, y
@@ -164,6 +176,8 @@ def live(p):
             setattr(p, k.replace("-", "_"), v)
 
     while True:
+        if state["quit"]:
+            break
         if state["down"] != 0:
             p._attractor = screen_to_world(state["mx"], state["my"])
             p._attract_sign = float(state["down"])
