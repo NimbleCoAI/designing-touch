@@ -69,21 +69,25 @@ def _mesh_from_tris(tris) -> np.ndarray:
     return np.array(out, dtype=np.float32)
 
 
-def _star5(outer=0.62, inner=0.25, h=0.3) -> np.ndarray:
-    """A 3D 5-pointed star (shallow bipyramid) — catches the directional light and
-    twinkles as it tumbles. Matariki-friendly. ✦"""
-    import math
-    perim = []
-    for k in range(10):
-        ang = math.pi / 2 + k * math.pi / 5          # top point, 36 deg steps
-        r = outer if k % 2 == 0 else inner
-        perim.append((r * math.cos(ang), r * math.sin(ang), 0.0))
-    apex_f, apex_b = (0.0, 0.0, h), (0.0, 0.0, -h)
-    tris = []
-    for i in range(10):
-        p, q = perim[i], perim[(i + 1) % 10]
-        tris.append((apex_f, p, q))                  # front pyramid
-        tris.append((apex_b, q, p))                  # back pyramid (reversed winding)
+def _star(spike=0.78, half=0.07, core=0.17) -> np.ndarray:
+    """A sparkle ✦ — a small bright octahedral core with thin spikes radiating along
+    all six axes. A glowing point with rays, not a flat pentagram; twinkles as the
+    different spikes catch the directional light while it tumbles."""
+    o = core
+    cp = [(o, 0, 0), (-o, 0, 0), (0, o, 0), (0, -o, 0), (0, 0, o), (0, 0, -o)]
+    oct_faces = [(0, 2, 4), (2, 1, 4), (1, 3, 4), (3, 0, 4),
+                 (2, 0, 5), (1, 2, 5), (3, 1, 5), (0, 3, 5)]
+    tris = [(cp[a], cp[b], cp[c]) for a, b, c in oct_faces]   # the core "sphere"
+    for ax in [(1, 0, 0), (-1, 0, 0), (0, 1, 0), (0, -1, 0), (0, 0, 1), (0, 0, -1)]:
+        d = np.array(ax, dtype=np.float64)
+        tip = (d * spike).tolist()
+        up = np.array([0, 0, 1.0]) if abs(d[2]) < 0.9 else np.array([1.0, 0, 0])
+        u = np.cross(d, up); u /= np.linalg.norm(u)
+        v = np.cross(d, u)
+        base = d * core
+        c = [(base + half * u), (base + half * v), (base - half * u), (base - half * v)]
+        for i in range(4):                                    # 4 side faces per spike
+            tris.append((tip, c[i].tolist(), c[(i + 1) % 4].tolist()))
     return _mesh_from_tris(tris)
 
 
@@ -100,7 +104,7 @@ def _bird(span=0.6, length=0.7, dihedral=0.12) -> np.ndarray:
     return _mesh_from_tris(tris)
 
 
-GEOMETRIES = {"cube": _unit_cube, "star": _star5, "bird": _bird}
+GEOMETRIES = {"cube": _unit_cube, "star": _star, "bird": _bird}
 
 
 VERTEX_SHADER = """
