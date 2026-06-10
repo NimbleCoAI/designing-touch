@@ -11,9 +11,12 @@ import json
 import os
 from typing import Dict
 
-# live-applicable keys a preset may set
+# live-applicable keys a preset may set. video/audio keys are saved by the panel but
+# absent from built-ins on purpose: a preset only touches the live video-bg / sound-react
+# state when it explicitly recorded one, so template-hopping doesn't reset your toggles.
 KEYS = ("matte", "palette", "fade", "exposure", "spark", "curl_amp", "reseed_frac",
-        "base_size", "damp", "pull_falloff", "attract_speed")
+        "base_size", "damp", "pull_falloff", "attract_speed",
+        "video_bg", "video_mix", "audio", "sens")
 
 BUILTIN: Dict[str, dict] = {
     # the loved abstract cloud
@@ -37,29 +40,60 @@ BUILTIN: Dict[str, dict] = {
 }
 
 
-def load(path: str = "presets.json") -> Dict[str, dict]:
-    """Built-in presets merged with user presets from `path` (user wins on name clash)."""
-    presets = {k: dict(v) for k, v in BUILTIN.items()}
+def _read(path: str) -> dict:
     if os.path.exists(path):
         try:
             with open(path) as f:
-                for name, cfg in json.load(f).items():
-                    presets[name] = {k: cfg[k] for k in KEYS if k in cfg}
+                return json.load(f)
         except Exception:
             pass
+    return {}
+
+
+def _write(data: dict, path: str):
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def load(path: str = "presets.json") -> Dict[str, dict]:
+    """Built-in presets merged with user presets from `path` (user wins on name clash)."""
+    presets = {k: dict(v) for k, v in BUILTIN.items()}
+    for name, cfg in _read(path).items():
+        presets[name] = {k: cfg[k] for k in KEYS if k in cfg}
     return presets
+
+
+def user_names(path: str = "presets.json") -> set:
+    """Names of the user-saved presets (the ones that can be renamed/deleted)."""
+    return set(_read(path).keys())
 
 
 def save(name: str, cfg: dict, path: str = "presets.json") -> str:
     """Write/replace a user preset, preserving other user presets in the file."""
-    existing = {}
-    if os.path.exists(path):
-        try:
-            with open(path) as f:
-                existing = json.load(f)
-        except Exception:
-            existing = {}
+    existing = _read(path)
     existing[name] = {k: cfg[k] for k in KEYS if k in cfg}
-    with open(path, "w") as f:
-        json.dump(existing, f, indent=2)
+    _write(existing, path)
     return path
+
+
+def delete(name: str, path: str = "presets.json") -> bool:
+    """Remove a user preset. Built-ins live in code, so they can't be deleted."""
+    existing = _read(path)
+    if name not in existing:
+        return False
+    del existing[name]
+    _write(existing, path)
+    return True
+
+
+def rename(old: str, new: str, path: str = "presets.json") -> bool:
+    """Rename a user preset. Refuses built-ins, name clashes, and empty names."""
+    new = new.strip()
+    existing = _read(path)
+    if old not in existing or not new or new == old:
+        return False
+    if new in existing or new in BUILTIN:
+        return False
+    existing[new] = existing.pop(old)
+    _write(existing, path)
+    return True

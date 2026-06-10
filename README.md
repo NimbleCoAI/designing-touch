@@ -31,7 +31,10 @@ One window: the live render plus a collapsible control panel (click the `>` to f
 - **Templates** — one-click looks: `abstract` (glowing cloud), `portrait`/`textured`
   (recognizable, painted with your real colors), `embers`, `aurora`, and **`sigil`** (sharp
   fractal contour lines — move, then hold still and watch them form). Save your own with
-  "Save current look".
+  "Save current look" — it captures everything, including Video bg / Vid mix and Sound
+  react / Sens. Hover a saved look for `~` (rename — type, Enter saves) and `x` (delete —
+  click twice). Built-ins can't be renamed or deleted, and they never touch your live
+  video/sound toggles when you switch to them.
 - **Source** — `matte` (what becomes particles: motion / saliency / person / edges / luma),
   `output` resolution (720p → 4K), and **Video bg** — show the raw camera footage behind the
   particles (screen-blended so the glow stays on top), with a `Vid mix` slider for how present
