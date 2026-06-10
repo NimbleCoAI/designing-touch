@@ -28,6 +28,22 @@ from . import presets as _presets
 MATTES = ["auto", "motion", "saliency", "person", "edges", "luma"]
 
 
+def composite_video_bg(particles_rgb, frame_bgr, mix):
+    """Screen-blend the raw camera footage under the additive particle render.
+
+    Screen (1 - (1-p)(1-bg*mix)) can only brighten, so the glow stays luminous on top
+    and nothing blows out; mix=0 returns the particles untouched. All-uint8 cv2 ops to
+    stay cheap at full render resolution.
+    """
+    if mix <= 0.0:
+        return particles_rgb
+    h, w = particles_rgb.shape[:2]
+    bg = cv2.cvtColor(cv2.resize(frame_bgr, (w, h)), cv2.COLOR_BGR2RGB)
+    bg = cv2.convertScaleAbs(bg, alpha=float(mix))
+    inv = cv2.multiply(cv2.bitwise_not(particles_rgb), cv2.bitwise_not(bg), scale=1.0 / 255.0)
+    return cv2.bitwise_not(inv)
+
+
 def _open_capture(device):
     if isinstance(device, int):
         return cv2.VideoCapture(device, cv2.CAP_AVFOUNDATION)
@@ -36,7 +52,7 @@ def _open_capture(device):
 
 def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
               n=200000, mirror=True, seed=1, preset="abstract", audio=False,
-              panel=True, show=True, max_frames=None):
+              panel=True, show=True, max_frames=None, video_bg=False, video_mix=0.5):
     rw, rh = res
     gw, gh = grid
     mw, mh = 416, 234
@@ -81,6 +97,8 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
             ui.sync_from(pf, glow, matte_kind)
             ui.mirror = mirror
             ui.audio = audio
+            ui.video_bg = video_bg
+            ui.video_mix = video_mix
             cv2.setMouseCallback(win, ui.on_mouse)
 
     mic = None
@@ -176,6 +194,11 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
             if ui is not None and ui.count < 0.999:
                 buf = buf[: int(ui.count * n) * 7]   # live dot-count control
             out = glow.render(buf)
+            if ui is not None:
+                video_bg, video_mix = ui.video_bg, ui.video_mix
+            if video_bg:
+                # frame is already mirrored here, so the footage lines up with the particles
+                out = composite_video_bg(out, frame, video_mix)
             if writer is not None:
                 writer.append_data(out)
             bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)
