@@ -51,6 +51,13 @@ class OverlayUI:
         self._tooltip = None
         self.pending_preset = None
         self.pending_save = False
+        self.user_presets = set()    # names that can be renamed/deleted (saved looks)
+        self.pending_delete = None   # name confirmed for deletion (live loop applies)
+        self.pending_rename = None   # (old, new) committed via Enter (live loop applies)
+        self.renaming = None         # name currently being renamed (typing mode)
+        self.rename_buf = ""
+        self._del_armed = None       # first x-click arms; second confirms
+        self._blink = 0
         self.panel_w = 290
         self.mouse = (-1, -1)
         self._hot = []
@@ -58,6 +65,8 @@ class OverlayUI:
         self._flash = 0
         self._flash_rect = None
 
+    @property
+    def typing(self): return self.renaming is not None
     @property
     def res_name(self): return self.res_options[self.res_idx][0]
     @property
@@ -131,6 +140,48 @@ class OverlayUI:
         self._hot.append((rb, "cycle", (key, +1)))
         return ry + 32
 
+    def _manage_buttons(self, frame, name, x, y, cw):
+        """Hover-revealed rename (~) and delete (x) buttons on a saved look's row.
+        Their hit rects go to the FRONT of _hot so they win over the full-row rect."""
+        db = (x + cw - 26, y + 2, x + cw - 4, y + 22)
+        rb = (x + cw - 52, y + 2, x + cw - 30, y + 22)
+        armed = self._del_armed == name
+        self._box(frame, rb, HOVER if _in(rb, self.mouse) else BTN)
+        self._text(frame, "~", rb[0] + 6, rb[3] - 7, INK, 0.45)
+        self._box(frame, db, RED if armed else (HOVER if _in(db, self.mouse) else BTN))
+        self._text(frame, "x", db[0] + 7, db[3] - 7, INK, 0.45, 2 if armed else 1)
+        if armed:
+            self._text(frame, "sure? x again", x - 118, y + 16, RED, 0.42, 1)
+        self._hot.insert(0, (db, "del", name))
+        self._hot.insert(0, (rb, "ren", name))
+
+    def _rename_box(self, frame, x, y, cw, px):
+        """The row being renamed becomes a text input (Enter saves, Esc cancels)."""
+        rect = (x, y, x + cw, y + 24)
+        self._box(frame, rect, DARK, border=ACC)
+        cur = "_" if (self._blink // 12) % 2 == 0 else ""
+        self._text(frame, self.rename_buf + cur, x + 10, y + 16, ACC, 0.46)
+        self._text(frame, "type name: enter=save esc=cancel", px - 240, y + 16, ACC, 0.42)
+
+    # ----- keyboard (rename typing) -----
+    def on_key(self, key):
+        """Feed a cv2.waitKey code. Returns True if consumed (a rename box is open),
+        so the caller knows not to treat 'q' as quit while the user is typing."""
+        if self.renaming is None:
+            return False
+        if key in (13, 10):              # enter — commit
+            new = self.rename_buf.strip()
+            if new and new != self.renaming:
+                self.pending_rename = (self.renaming, new)
+            self.renaming = None
+        elif key == 27:                  # esc — cancel
+            self.renaming = None
+        elif key in (8, 127):            # backspace / delete
+            self.rename_buf = self.rename_buf[:-1]
+        elif 32 <= key <= 126 and len(self.rename_buf) < 22:
+            self.rename_buf += chr(key)
+        return True
+
     # ----- layout -----
     def draw(self, frame, info):
         self._hot = []
@@ -157,8 +208,16 @@ class OverlayUI:
         y += 16
 
         self._text(frame, "TEMPLATES", x, y, DIM, 0.4); y += 8
+        self._blink += 1
         for i, name in enumerate(self.presets):
-            self._row(frame, name, "preset", x, y, cw, active=(i == self.preset_idx), payload=i)
+            if name == self.renaming:
+                self._rename_box(frame, x, y, cw, px)
+                y += 28
+                continue
+            r = self._row(frame, name, "preset", x, y, cw,
+                          active=(i == self.preset_idx), payload=i)
+            if name in self.user_presets and (_in(r, self.mouse) or name == self._del_armed):
+                self._manage_buttons(frame, name, x, y, cw)
             y += 28
         self._row(frame, "+ Save current look", "save", x, y, cw); y += 34
 
@@ -262,6 +321,19 @@ class OverlayUI:
             self._scroll_drag = None
 
     def _activate(self, kind, payload, x):
+        if kind != "del" and self._del_armed:
+            self._del_armed = None       # any other click disarms a pending delete
+        if kind == "del":
+            if self._del_armed == payload:
+                self.pending_delete = payload
+                self._del_armed = None
+            else:
+                self._del_armed = payload
+            return
+        if kind == "ren":
+            self.renaming = payload
+            self.rename_buf = payload    # prefill with the current name
+            return
         if kind == "collapse":
             self.open = not self.open
         elif kind == "preset":

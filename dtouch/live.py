@@ -68,7 +68,7 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
     def apply_preset(name):
         nonlocal matte_kind, mat
         if name not in all_presets:
-            return
+            return {}
         # merge over defaults so switching presets fully resets physics params
         # (otherwise e.g. sigil's low damping would leak into the next look)
         d = dict(palette="ice", spark=0.35, curl_amp=0.5, reseed_frac=0.06, base_size=0.011,
@@ -80,9 +80,14 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
         pf.reseed_frac = cfg["reseed_frac"]; pf.base_size = cfg["base_size"]; pf.damp = cfg["damp"]
         pf.pull_falloff = cfg["pull_falloff"]; pf.attract_speed = cfg["attract_speed"]
         glow.fade = cfg["fade"]; glow.exposure = cfg["exposure"]
+        # video/audio state is applied only when the preset recorded it (saved looks do;
+        # built-ins don't), so template-hopping never resets the live toggles.
+        return all_presets[name]
 
-    if preset in all_presets:
-        apply_preset(preset)
+    raw0 = apply_preset(preset) if preset in all_presets else {}
+    video_bg = bool(raw0.get("video_bg", video_bg))
+    video_mix = float(raw0.get("video_mix", video_mix))
+    audio = bool(raw0.get("audio", audio))
 
     ui = None
     win = "dtouch - flow"
@@ -99,6 +104,9 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
             ui.audio = audio
             ui.video_bg = video_bg
             ui.video_mix = video_mix
+            if "sens" in raw0:
+                ui.sens = float(raw0["sens"])
+            ui.user_presets = _presets.user_names()
             cv2.setMouseCallback(win, ui.on_mouse)
 
     mic = None
@@ -121,8 +129,12 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
 
             if ui is not None:
                 if ui.pending_preset:
-                    apply_preset(ui.pending_preset)
+                    raw = apply_preset(ui.pending_preset)
                     ui.sync_from(pf, glow, matte_kind)
+                    if "video_bg" in raw: ui.video_bg = bool(raw["video_bg"])
+                    if "video_mix" in raw: ui.video_mix = float(raw["video_mix"])
+                    if "audio" in raw: ui.audio = bool(raw["audio"])
+                    if "sens" in raw: ui.sens = float(raw["sens"])
                     ui.pending_preset = None
                 if ui.pending_save:
                     name = "mine_%s" % time.strftime("%H%M%S")
@@ -130,14 +142,43 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
                                   fade=glow.fade, exposure=ui.exposure, spark=ui.spark,
                                   curl_amp=ui.curl, reseed_frac=ui.reseed, base_size=ui.dot,
                                   damp=ui.damp, pull_falloff=ui.pull,
-                                  attract_speed=pf.attract_speed))
+                                  attract_speed=pf.attract_speed,
+                                  video_bg=ui.video_bg, video_mix=ui.video_mix,
+                                  audio=ui.audio, sens=ui.sens))
                     all_presets = _presets.load()
                     preset_names = list(all_presets.keys())
                     ui.presets = preset_names
+                    ui.user_presets = _presets.user_names()
                     if name in preset_names:
                         ui.preset_idx = preset_names.index(name)
                     print("saved preset", name)
                     ui.pending_save = False
+                if ui.pending_delete:
+                    sel = ui.preset_name if ui.preset_idx < len(ui.presets) else None
+                    if _presets.delete(ui.pending_delete):
+                        all_presets = _presets.load()
+                        preset_names = list(all_presets.keys())
+                        ui.presets = preset_names
+                        ui.user_presets = _presets.user_names()
+                        ui.preset_idx = (preset_names.index(sel)
+                                         if sel in preset_names else 0)
+                        print("deleted preset", ui.pending_delete)
+                    ui.pending_delete = None
+                if ui.pending_rename:
+                    old, new = ui.pending_rename
+                    sel = ui.preset_name if ui.preset_idx < len(ui.presets) else None
+                    if _presets.rename(old, new):
+                        all_presets = _presets.load()
+                        preset_names = list(all_presets.keys())
+                        ui.presets = preset_names
+                        ui.user_presets = _presets.user_names()
+                        target = new if sel == old else sel
+                        ui.preset_idx = (preset_names.index(target)
+                                         if target in preset_names else 0)
+                        print("renamed preset", old, "->", new)
+                    else:
+                        print("rename refused (name taken or invalid):", old, "->", new)
+                    ui.pending_rename = None
                 if ui.matte_name != matte_kind:
                     matte_kind = ui.matte_name; mat = make_matte(matte_kind)
                 pf.palette = ui.palette_name
@@ -216,7 +257,9 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
                                 (90, 220, 120), 1, cv2.LINE_AA)
                 cv2.imshow(win, bgr)
                 key = cv2.waitKey(1) & 0xFF   # pump GUI + mouse; ESC intentionally ignored
-                if key == ord('q') or (ui is not None and ui.quit):
+                # a rename box consumes keystrokes first, so typing 'q' doesn't quit
+                consumed = ui.on_key(key) if (ui is not None and key != 255) else False
+                if (key == ord('q') and not consumed) or (ui is not None and ui.quit):
                     break
                 # quit only when the window is actually destroyed (red X) -> property is -1.
                 # A minimized window reports 0, so this does NOT quit on minimize.
