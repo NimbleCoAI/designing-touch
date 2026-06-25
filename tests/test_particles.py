@@ -1,5 +1,6 @@
 """Tests for the particle-flow simulation."""
 import numpy as np
+import pytest
 
 from dtouch.particles import ParticleFlow
 
@@ -28,6 +29,68 @@ def test_particles_flow_into_the_matte_region():
     # particles should concentrate in the matte square (it covers ~1/9 of the area)
     assert end > start + 0.3, f"particles did not gather: {start:.2f} -> {end:.2f}"
     assert end > 0.6
+
+
+def test_init_rejects_non_positive_n():
+    with pytest.raises(ValueError, match="n must be > 0"):
+        ParticleFlow(n=0)
+    with pytest.raises(ValueError, match="n must be > 0"):
+        ParticleFlow(n=-10)
+
+
+def test_init_rejects_non_positive_gw():
+    with pytest.raises(ValueError, match="gw must be > 0"):
+        ParticleFlow(gw=0)
+    with pytest.raises(ValueError, match="gw must be > 0"):
+        ParticleFlow(gw=-8)
+
+
+def test_init_rejects_non_positive_gh():
+    with pytest.raises(ValueError, match="gh must be > 0"):
+        ParticleFlow(gh=0)
+    with pytest.raises(ValueError, match="gh must be > 0"):
+        ParticleFlow(gh=-1)
+
+
+def test_init_rejects_damp_out_of_range():
+    with pytest.raises(ValueError, match="damp must be in"):
+        ParticleFlow(damp=1.1)
+    with pytest.raises(ValueError, match="damp must be in"):
+        ParticleFlow(damp=-0.01)
+
+
+def test_init_rejects_reseed_frac_out_of_range():
+    with pytest.raises(ValueError, match="reseed_frac must be in"):
+        ParticleFlow(reseed_frac=1.5)
+    with pytest.raises(ValueError, match="reseed_frac must be in"):
+        ParticleFlow(reseed_frac=-0.1)
+
+
+def test_init_rejects_non_positive_pull_falloff():
+    with pytest.raises(ValueError, match="pull_falloff must be > 0"):
+        ParticleFlow(pull_falloff=0.0)
+    with pytest.raises(ValueError, match="pull_falloff must be > 0"):
+        ParticleFlow(pull_falloff=-5.0)
+
+
+def test_init_rejects_negative_spark():
+    with pytest.raises(ValueError, match="spark must be >= 0"):
+        ParticleFlow(spark=-0.1)
+
+
+def test_init_accepts_boundary_values():
+    pf = ParticleFlow(n=2, gw=2, gh=2, damp=0.0, reseed_frac=0.0,
+                      pull_falloff=0.001, spark=0.0)
+    assert pf.n == 2
+    assert pf.damp == 0.0
+    assert pf.reseed_frac == 0.0
+    assert pf.spark == 0.0
+
+    pf2 = ParticleFlow(n=2, gw=2, gh=2, damp=1.0, reseed_frac=1.0,
+                       pull_falloff=100.0, spark=0.0)
+    assert pf2.damp == 1.0
+    assert pf2.reseed_frac == 1.0
+    assert pf2.pull_falloff == 100.0
 
 
 def test_render_data_shape_and_bounds():
