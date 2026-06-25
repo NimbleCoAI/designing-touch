@@ -34,14 +34,20 @@ def test_particles_flow_into_the_matte_region():
 def test_init_rejects_non_positive_n():
     with pytest.raises(ValueError, match="n must be > 0"):
         ParticleFlow(n=0)
+    with pytest.raises(ValueError, match="n must be > 0"):
+        ParticleFlow(n=-10)
 
 
 def test_init_rejects_non_positive_gw():
     with pytest.raises(ValueError, match="gw must be > 0"):
         ParticleFlow(gw=0)
+    with pytest.raises(ValueError, match="gw must be > 0"):
+        ParticleFlow(gw=-8)
 
 
 def test_init_rejects_non_positive_gh():
+    with pytest.raises(ValueError, match="gh must be > 0"):
+        ParticleFlow(gh=0)
     with pytest.raises(ValueError, match="gh must be > 0"):
         ParticleFlow(gh=-1)
 
@@ -73,11 +79,18 @@ def test_init_rejects_negative_spark():
 
 
 def test_init_accepts_boundary_values():
-    # boundary values that are valid should not raise
-    pf = ParticleFlow(n=1, gw=2, gh=2, damp=0.0, reseed_frac=0.0, spark=0.0)
-    assert pf.n == 1
-    pf = ParticleFlow(n=1, gw=2, gh=2, damp=1.0, reseed_frac=1.0, spark=0.0)
-    assert pf.damp == 1.0
+    pf = ParticleFlow(n=2, gw=2, gh=2, damp=0.0, reseed_frac=0.0,
+                      pull_falloff=0.001, spark=0.0)
+    assert pf.n == 2
+    assert pf.damp == 0.0
+    assert pf.reseed_frac == 0.0
+    assert pf.spark == 0.0
+
+    pf2 = ParticleFlow(n=2, gw=2, gh=2, damp=1.0, reseed_frac=1.0,
+                       pull_falloff=100.0, spark=0.0)
+    assert pf2.damp == 1.0
+    assert pf2.reseed_frac == 1.0
+    assert pf2.pull_falloff == 100.0
 
 
 def test_render_data_shape_and_bounds():
