@@ -44,6 +44,20 @@ class ParticleFlow:
                  K=0.20, attract_speed=4.5, pull_falloff=22.0,
                  flow_gain=0.6, curl_amp=0.5, damp=0.90,
                  reseed_frac=0.06, base_size=0.011, speed_ref=4.0, spark=0.35):
+        if n <= 0:
+            raise ValueError(f"n must be > 0, got {n}")
+        if gw <= 0:
+            raise ValueError(f"gw must be > 0, got {gw}")
+        if gh <= 0:
+            raise ValueError(f"gh must be > 0, got {gh}")
+        if not (0.0 <= damp <= 1.0):
+            raise ValueError(f"damp must be in [0, 1], got {damp}")
+        if not (0.0 <= reseed_frac <= 1.0):
+            raise ValueError(f"reseed_frac must be in [0, 1], got {reseed_frac}")
+        if pull_falloff <= 0:
+            raise ValueError(f"pull_falloff must be > 0, got {pull_falloff}")
+        if spark < 0:
+            raise ValueError(f"spark must be >= 0, got {spark}")
         self.n, self.gw, self.gh = n, gw, gh
         rng = np.random.default_rng(seed)
         self.px = rng.uniform(0, gw, n).astype(np.float32)
