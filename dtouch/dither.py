@@ -12,20 +12,15 @@ import numpy as np
 def _bayer_matrix(n: int) -> np.ndarray:
     """Recursively generate a normalised n×n Bayer threshold matrix.
 
-    n must be a power of 2. Values are in [0, 1) with the recursive structure:
+    n must be a power of 2. If sub = M(n)/n² is the normalised n×n matrix,
+    the normalised 2n×2n matrix is:
 
-        M(2n) = [[M(n),       M(n)+2/4n²],
-                  [M(n)+3/4n², M(n)+1/4n²]]
+        [[sub,        sub + 2/N²],
+         [sub + 3/N², sub + 1/N²]]    where N² = (2n)²
 
-    which, when M(n) is already normalised by n², simplifies to:
-
-        M(2n) / (2n)² = [[M(n)/n²,        M(n)/n² + 2/(4n²)],
-                          [M(n)/n² + 3/(4n²), M(n)/n² + 1/(4n²)]]
-
-    so the normalised recursion is:
-
-        sub = M(n)/n²
-        M(2n)/(2n)² = [[sub, sub+2/N²], [sub+3/N², sub+1/N²]]   where N=2n
+    This is derived from the standard unnormalised recursion
+    M(2n) = [[4·M(n), 4·M(n)+2], [4·M(n)+3, 4·M(n)+1]] by dividing both
+    sides by N² = 4n² and using sub = M(n)/n².
     """
     if n == 1:
         return np.array([[0.0]], dtype=np.float32)

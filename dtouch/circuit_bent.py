@@ -134,7 +134,9 @@ class CircuitBent:
             out = self._apply_chroma_shift(out, h, w)
 
         # 3. Glitch blocks: random region corruption that persists N frames.
-        if self.glitch_prob > 0:
+        # Also call when glitch_prob is 0 but a glitch is still in its hold window
+        # so live prob=0 changes drain the active glitch rather than freezing it.
+        if self.glitch_prob > 0 or self._glitch_hold_rem > 0 or self._glitch_rect is not None:
             out = self._apply_glitch(out, h, w)
 
         # 4. Hard bit-depth reduction (quantisation / posterisation).
@@ -221,6 +223,10 @@ class CircuitBent:
             self._glitch_tile = out[sy:sy + bh, sx:sx + bw].copy()
             self._glitch_rect = (y0, x0, bh, bw)
             self._glitch_hold_rem = self.glitch_hold
+        else:
+            # Hold expired and no new glitch fired: clear so the tile stops replaying.
+            self._glitch_rect = None
+            self._glitch_tile = None
 
         if self._glitch_rect is not None and self._glitch_tile is not None:
             y0, x0, bh, bw = self._glitch_rect
