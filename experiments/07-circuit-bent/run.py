@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Experiment 06 — circuit-bent camera effect (live or synthetic).
+"""Experiment 07 — circuit-bent camera effect (live or synthetic).
 
 Applies stochastic circuit-bent glitching (chroma bleed, scan-line drift,
 glitch blocks, bit-crush, CRT scan lines) and Bayer/Floyd-Steinberg dithering
