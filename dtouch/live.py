@@ -22,7 +22,8 @@ from .matte import make_matte
 from .particles import ParticleFlow, PALETTES
 from .glow import GlowRenderer
 from .audio import LiveMic
-from .overlay_ui import OverlayUI
+from .overlay_ui import OverlayUI, DITHERS
+from .circuit_bent import CircuitBent
 from . import presets as _presets
 
 MATTES = ["auto", "motion", "saliency", "person", "edges", "luma"]
@@ -44,6 +45,27 @@ def composite_video_bg(particles_rgb, frame_bgr, mix):
     return cv2.bitwise_not(inv)
 
 
+def _apply_fx(ui, raw):
+    """Restore MOTION + SIGNAL state from a saved look, if it recorded any.
+
+    Every key is optional: the built-in presets predate these effects and saved looks from
+    before this change have none of them. A missing key must leave the live toggle alone
+    rather than resetting it, which is the same rule video_bg/audio already follow — otherwise
+    hopping between built-in templates would silently switch your glitch off.
+    """
+    from .overlay_ui import DITHERS
+    if "flock" in raw: ui.flock = bool(raw["flock"])
+    if "cohere" in raw: ui.cohere = float(raw["cohere"])
+    if "align" in raw: ui.align = float(raw["align"])
+    if "separate" in raw: ui.separate = float(raw["separate"])
+    if "glitch" in raw: ui.glitch = bool(raw["glitch"])
+    if "chroma" in raw: ui.chroma = float(raw["chroma"])
+    if "drift" in raw: ui.drift = float(raw["drift"])
+    if "crush" in raw: ui.crush = float(raw["crush"])
+    if "scanlines" in raw: ui.scanlines = bool(raw["scanlines"])
+    if raw.get("dither") in DITHERS: ui.dither_idx = DITHERS.index(raw["dither"])
+
+
 def _open_capture(device):
     if isinstance(device, int):
         return cv2.VideoCapture(device, cv2.CAP_AVFOUNDATION)
@@ -52,7 +74,8 @@ def _open_capture(device):
 
 def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
               n=200000, mirror=True, seed=1, preset="abstract", audio=False,
-              panel=True, show=True, max_frames=None, video_bg=False, video_mix=0.5):
+              panel=True, show=True, max_frames=None, video_bg=False, video_mix=0.5,
+             flock=False, glitch=False):
     rw, rh = res
     gw, gh = grid
     mw, mh = 416, 234
@@ -102,10 +125,17 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
             ui.sync_from(pf, glow, matte_kind)
             ui.mirror = mirror
             ui.audio = audio
+            # CLI opt-ins: turn the effect on AND open its section, so --glitch doesn't leave
+            # someone hunting for the controls behind a collapsed header.
+            ui.flock = ui.flock or flock
+            ui.glitch = ui.glitch or glitch
+            if flock: ui.sections["MOTION"] = True
+            if glitch: ui.sections["SIGNAL"] = True
             ui.video_bg = video_bg
             ui.video_mix = video_mix
             if "sens" in raw0:
                 ui.sens = float(raw0["sens"])
+            _apply_fx(ui, raw0)      # the look loaded at startup, same as a live switch
             ui.user_presets = _presets.user_names()
             cv2.setMouseCallback(win, ui.on_mouse)
 
@@ -115,6 +145,7 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
     writer = None; rec_path = None
     os.makedirs("out", exist_ok=True)
 
+    cb = None            # circuit-bent post-FX, built on first use
     t0 = time.time(); fps = 0.0; count = 0
     black_streak = 0
     out = None
@@ -135,6 +166,7 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
                     if "video_mix" in raw: ui.video_mix = float(raw["video_mix"])
                     if "audio" in raw: ui.audio = bool(raw["audio"])
                     if "sens" in raw: ui.sens = float(raw["sens"])
+                    _apply_fx(ui, raw)
                     ui.pending_preset = None
                 if ui.pending_save:
                     name = "mine_%s" % time.strftime("%H%M%S")
@@ -144,7 +176,14 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
                                   damp=ui.damp, pull_falloff=ui.pull,
                                   attract_speed=pf.attract_speed,
                                   video_bg=ui.video_bg, video_mix=ui.video_mix,
-                                  audio=ui.audio, sens=ui.sens))
+                                  audio=ui.audio, sens=ui.sens,
+                                  # MOTION + SIGNAL travel with the look; without these a
+                                  # saved glitch preset would come back clean.
+                                  flock=ui.flock, cohere=ui.cohere, align=ui.align,
+                                  separate=ui.separate,
+                                  glitch=ui.glitch, chroma=ui.chroma, drift=ui.drift,
+                                  crush=ui.crush, dither=ui.dither_name,
+                                  scanlines=ui.scanlines))
                     all_presets = _presets.load()
                     preset_names = list(all_presets.keys())
                     ui.presets = preset_names
@@ -187,6 +226,11 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
                 pf.damp = ui.damp
                 pf.pull_falloff = ui.pull
                 pf.reseed_frac = ui.reseed
+                # flocking: gains go to 0 when the toggle is off, which short-circuits the
+                # solver entirely — the off state costs nothing, not even a pass over the array.
+                pf.flock_cohesion = ui.cohere if ui.flock else 0.0
+                pf.flock_alignment = ui.align if ui.flock else 0.0
+                pf.flock_separation = ui.separate if ui.flock else 0.0
                 glow.fade = ui.fade
                 mirror = ui.mirror
                 nw, nh = ui.res_wh
@@ -240,6 +284,22 @@ def live_flow(device="builtin", matte="auto", res=(1920, 1080), grid=(416, 234),
             if video_bg:
                 # frame is already mirrored here, so the footage lines up with the particles
                 out = composite_video_bg(out, frame, video_mix)
+            # SIGNAL post-FX. Applied here on purpose: after the particles and the video
+            # composite (so it bends the whole picture), before the recorder (so captures match
+            # what you see) and before ui.draw (so the control panel never gets glitched into
+            # unreadability). CircuitBent is documented for BGR; `out` is RGB, which only swaps
+            # which channel drifts left vs right — the offsets are independent symmetric draws,
+            # so the look is identical. Constructed lazily so a session that never enables it
+            # pays nothing.
+            if ui is not None and ui.glitch:
+                if cb is None:
+                    cb = CircuitBent(seed=seed)
+                cb.chroma_shift = ui.chroma
+                cb.scan_drift = ui.drift
+                cb.bit_crush = int(ui.crush)
+                cb.scanlines = ui.scanlines
+                cb.dither_mode = None if ui.dither_name == "off" else ui.dither_name
+                out = cb.process(out)
             if writer is not None:
                 writer.append_data(out)
             bgr = cv2.cvtColor(out, cv2.COLOR_RGB2BGR)

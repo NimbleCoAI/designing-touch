@@ -27,6 +27,10 @@ DARK = (20, 22, 20)
 
 BASE_H = 1080   # resolution the layout literals are authored against
 
+# Post-FX dither modes, in cycle order. "off" is a deliberate third choice rather than a
+# disabled state — the glitch chain is still worth having without the dither.
+DITHERS = ["bayer", "fs", "off"]
+
 
 def _in(rect, p):
     x0, y0, x1, y1 = rect
@@ -46,11 +50,28 @@ class OverlayUI:
         self.count = 0.75   # fraction of the allocated particles to render
         self.mirror, self.audio, self.sens, self.record = True, False, 1.0, False
         self.video_bg, self.video_mix = False, 0.5   # raw footage behind the particles
+        # MOTION — boids steering on the particle cloud (dtouch.flock). Off by default:
+        # every gain at 0 short-circuits the solver, so the existing look is untouched.
+        self.flock = False
+        self.cohere, self.align, self.separate = 0.35, 0.45, 0.30
+        # SIGNAL — circuit-bent post-processing on the rendered frame (dtouch.circuit_bent).
+        # `dither_idx` indexes DITHERS; "off" is a real choice, not a disabled state.
+        self.glitch = False
+        self.chroma, self.drift, self.crush = 10.0, 8.0, 0.0
+        self.dither_idx = 0
+        self.scanlines = True
         self.res_options = [("720p", 1280, 720), ("1080p", 1920, 1080),
                             ("1440p", 2560, 1440), ("4K", 3840, 2160)]
         self.res_idx = next((i for i, (_, rw, rh) in enumerate(self.res_options)
                              if (rw, rh) == (w, h)), 1)
         self.open = True
+        # Collapsible sections. The panel grew past the 1080p window when MOTION and SIGNAL
+        # were added, breaking the "everything reachable without scrolling at 1080p" contract
+        # (tests/test_overlay_scroll.py). Collapsing is the fix that keeps scaling: each new
+        # family of effects costs one header row until you open it. The two new sections start
+        # closed so the panel opens looking like it always did.
+        self.sections = {"TEMPLATES": True, "SOURCE": True, "LOOK": True,
+                         "MOTION": False, "SIGNAL": False}
         self.quit = False
         self.scroll = 0          # panel scroll offset (px) — content taller than the window
         self._content_h = 0      # measured column height from the last draw
@@ -84,6 +105,9 @@ class OverlayUI:
     def matte_name(self): return self.mattes[self.matte_idx]
     @property
     def palette_name(self): return self.palettes[self.palette_idx]
+
+    @property
+    def dither_name(self): return DITHERS[self.dither_idx]
     @property
     def preset_name(self): return self.presets[self.preset_idx]
 
@@ -143,6 +167,21 @@ class OverlayUI:
         self._hot.append(((tx0 - self._S(8), y, tx1 + self._S(8), y + self._S(26)),
                           "slider", (attr, tx0, tx1, lo, hi)))
         return y + self._S(30)
+
+    def _section(self, img, title, x, y, w):
+        """Clickable section header. Returns (next_y, is_open).
+
+        ASCII markers only: cv2's Hershey font renders no glyph for the usual disclosure
+        triangles, so they come out as '???' (see the module docstring).
+        """
+        is_open = self.sections.get(title, True)
+        rect = (x - self._S(4), y - self._S(4), x + w, y + self._S(14))
+        if _in(rect, self.mouse):
+            self._box(img, rect, HOVER)
+        self._text(img, ("- " if is_open else "+ ") + title, x, y + self._S(8),
+                   INK if is_open else DIM, 0.4)
+        self._hot.append((rect, "section", title))
+        return y + self._S(16), is_open
 
     def _cycle(self, img, label, value, key, x, y, w):
         self._text(img, label, x, y + self._S(10), DIM, 0.42)
@@ -232,9 +271,9 @@ class OverlayUI:
         self._text(frame, "dtouch", x, y, ACC, 0.62, 2)
         y += self._S(16)
 
-        self._text(frame, "TEMPLATES", x, y, DIM, 0.4); y += self._S(8)
+        y, sec_open = self._section(frame, "TEMPLATES", x, y, cw)
         self._blink += 1
-        for i, name in enumerate(self.presets):
+        for i, name in enumerate(self.presets if sec_open else []):
             if name == self.renaming:
                 self._rename_box(frame, x, y, cw, px)
                 y += self._S(28)
@@ -244,22 +283,57 @@ class OverlayUI:
             if name in self.user_presets and (_in(r, self.mouse) or name == self._del_armed):
                 self._manage_buttons(frame, name, x, y, cw)
             y += self._S(28)
-        self._row(frame, "+ Save current look", "save", x, y, cw); y += self._S(34)
-
-        self._text(frame, "SOURCE", x, y, DIM, 0.4); y += self._S(6)
-        y = self._cycle(frame, "matte", self.matte_name, "matte", x, y, cw) + self._S(2)
-        y = self._cycle(frame, "output", self.res_name, "res", x, y, cw) + self._S(2)
-        self._row(frame, "Video bg: " + ("ON" if self.video_bg else "off"),
-                  "video_bg", x, y, cw, active=self.video_bg); y += self._S(28)
-        y = self._slider(frame, "Vid mix", "video_mix", x, y, cw,
-                         "How visible the raw camera footage is behind the particles.") + self._S(6)
-
-        self._text(frame, "LOOK", x, y, DIM, 0.4); y += self._S(6)
-        y = self._cycle(frame, "color", self.palette_name, "color", x, y, cw) + self._S(4)
-        for label, attr, tip in _SLIDERS:
-            y = self._slider(frame, label, attr, x, y, cw, tip)
-
+        if sec_open:
+            self._row(frame, "+ Save current look", "save", x, y, cw); y += self._S(30)
         y += self._S(4)
+
+        y, sec_open = self._section(frame, "SOURCE", x, y, cw)
+        if sec_open:
+            y = self._cycle(frame, "matte", self.matte_name, "matte", x, y, cw) + self._S(2)
+            y = self._cycle(frame, "output", self.res_name, "res", x, y, cw) + self._S(2)
+            self._row(frame, "Video bg: " + ("ON" if self.video_bg else "off"),
+                      "video_bg", x, y, cw, active=self.video_bg); y += self._S(28)
+            y = self._slider(frame, "Vid mix", "video_mix", x, y, cw,
+                             "How visible the raw camera footage is behind the particles.")
+        y += self._S(4)
+
+        y, sec_open = self._section(frame, "LOOK", x, y, cw)
+        if sec_open:
+            y = self._cycle(frame, "color", self.palette_name, "color", x, y, cw) + self._S(4)
+            for label, attr, tip in _SLIDERS:
+                y = self._slider(frame, label, attr, x, y, cw, tip)
+        y += self._S(4)
+
+        # MOTION — boids steering (dtouch.flock). The sliders stay visible while off so the
+        # section reads as a thing you can turn on, not a thing that appears from nowhere.
+        y, sec_open = self._section(frame, "MOTION", x, y, cw)
+        if sec_open:
+            self._row(frame, "Flock: " + ("ON" if self.flock else "off"),
+                      "flock", x, y, cw, active=self.flock); y += self._S(28)
+            y = self._slider(frame, "Cohere", "cohere", x, y, cw,
+                             "Steer toward the local centre. Pulls the cloud into shoals.")
+            y = self._slider(frame, "Align", "align", x, y, cw,
+                             "Match neighbours' direction. This is what makes it move as one.")
+            y = self._slider(frame, "Separate", "separate", x, y, cw,
+                             "Push apart when crowded. Stops the shoal collapsing to a dot.")
+        y += self._S(4)
+
+        # SIGNAL — circuit-bent post-processing (dtouch.circuit_bent), applied to the rendered
+        # frame after the particles, before the panel is drawn (so the panel stays readable).
+        y, sec_open = self._section(frame, "SIGNAL", x, y, cw)
+        if sec_open:
+            self._row(frame, "Glitch: " + ("ON" if self.glitch else "off"),
+                      "glitch", x, y, cw, active=self.glitch); y += self._S(28)
+            y = self._cycle(frame, "dither", self.dither_name, "dither", x, y, cw) + self._S(2)
+            y = self._slider(frame, "Chroma", "chroma", x, y, cw,
+                             "Colour bleed: red and blue drift apart, slowly.")
+            y = self._slider(frame, "Drift", "drift", x, y, cw,
+                             "Scan-line sync loss. Rows slip sideways; sometimes a whole band tears.")
+            y = self._slider(frame, "Crush", "crush", x, y, cw,
+                             "Hard bit-depth reduction. 0 = off.")
+            self._row(frame, "Scanlines: " + ("on" if self.scanlines else "off"),
+                      "scanlines", x, y, cw, active=self.scanlines); y += self._S(28)
+        y += self._S(6)
         self._row(frame, "Sound react: " + ("ON" if self.audio else "off"),
                   "audio", x, y, cw, active=self.audio); y += self._S(28)
         y = self._slider(frame, "Sens", "sens", x, y, cw,
@@ -374,6 +448,8 @@ class OverlayUI:
                 self.palette_idx = (self.palette_idx + d) % len(self.palettes)
             elif key == "res":
                 self.res_idx = (self.res_idx + d) % len(self.res_options)
+            elif key == "dither":
+                self.dither_idx = (self.dither_idx + d) % len(DITHERS)
         elif kind == "slider":
             attr, x0, x1, lo, hi = payload
             self._drag = payload
@@ -387,6 +463,14 @@ class OverlayUI:
             self.mirror = not self.mirror
         elif kind == "video_bg":
             self.video_bg = not self.video_bg
+        elif kind == "section":
+            self.sections[payload] = not self.sections.get(payload, True)
+        elif kind == "flock":
+            self.flock = not self.flock
+        elif kind == "glitch":
+            self.glitch = not self.glitch
+        elif kind == "scanlines":
+            self.scanlines = not self.scanlines
         elif kind == "save":
             self.pending_save = True
         elif kind == "quit":
@@ -398,6 +482,9 @@ _RANGES = {
     "curl": (0.0, 1.0), "dot": (0.004, 0.020), "sens": (0.0, 3.0),
     "count": (0.1, 1.0), "damp": (0.82, 0.985), "pull": (8.0, 40.0), "reseed": (0.005, 0.15),
     "video_mix": (0.05, 1.0),
+    # MOTION (boids gains) and SIGNAL (circuit-bent) — see dtouch.flock / dtouch.circuit_bent
+    "cohere": (0.0, 1.0), "align": (0.0, 1.0), "separate": (0.0, 1.0),
+    "chroma": (0.0, 60.0), "drift": (0.0, 40.0), "crush": (0.0, 8.0),
 }
 
 _SLIDERS = [

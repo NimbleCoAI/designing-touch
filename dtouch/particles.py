@@ -13,6 +13,8 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from .flock import flock_forces
+
 PALETTES = ["ice", "video", "rainbow", "fire", "aurora", "mono"]
 
 
@@ -43,7 +45,9 @@ class ParticleFlow:
     def __init__(self, n=40000, gw=256, gh=144, seed=0, tint=(0.45, 0.72, 1.0),
                  K=0.20, attract_speed=4.5, pull_falloff=22.0,
                  flow_gain=0.6, curl_amp=0.5, damp=0.90,
-                 reseed_frac=0.06, base_size=0.011, speed_ref=4.0, spark=0.35):
+                 reseed_frac=0.06, base_size=0.011, speed_ref=4.0, spark=0.35,
+                 flock_cohesion=0.0, flock_alignment=0.0, flock_separation=0.0,
+                 flock_cell=12.0):
         if n <= 0:
             raise ValueError(f"n must be > 0, got {n}")
         if gw <= 0:
@@ -71,6 +75,12 @@ class ParticleFlow:
         self.damp, self.reseed_frac = damp, reseed_frac
         self.base_size, self.speed_ref = base_size, speed_ref
         self.spark = spark
+        # Flocking gains. Zero = off, which is the default: the live instrument's
+        # existing look must be bit-identical unless someone turns this on.
+        self.flock_cohesion = flock_cohesion
+        self.flock_alignment = flock_alignment
+        self.flock_separation = flock_separation
+        self.flock_cell = flock_cell
         self.palette = "ice"
         self._rng = rng
         self._prev_gray = None
@@ -136,6 +146,17 @@ class ParticleFlow:
         # flow carries motion; curl gives organic drift everywhere (life inside the shape)
         self.vx += self.flow_gain * fwx + self.curl_amp * cnx
         self.vy += self.flow_gain * fwy + self.curl_amp * cny
+        # flocking: Reynolds steering against a grid-approximated local neighbourhood, so
+        # the cloud organises into shoals instead of only following the flow field. Applied
+        # BEFORE damping and integration, like every other force here. Costs nothing when
+        # the gains are 0 (flock_forces short-circuits), which is the default.
+        if self.flock_cohesion or self.flock_alignment or self.flock_separation:
+            ffx, ffy = flock_forces(
+                self.px, self.py, self.vx, self.vy, self.gw, self.gh,
+                cell=self.flock_cell, cohesion=self.flock_cohesion,
+                alignment=self.flock_alignment, separation=self.flock_separation)
+            self.vx += ffx
+            self.vy += ffy
         # motion-spark: fast local motion scatters particles into energetic sparks
         if self.spark > 0:
             fmag = np.hypot(fwx, fwy)
