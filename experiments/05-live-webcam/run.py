@@ -11,7 +11,13 @@ Mode 'grid' is the older luminance-displaced grid.
     python run.py --device 1            # a specific camera index
     python run.py --mode grid           # the old displacement-grid effect
 
+    python run.py --flock               # start with the particle cloud flocking
+    python run.py --glitch              # start with the circuit-bent signal chain on
+
 Controls (flow): q quit · n cycle matte · m mirror · [ ] trail length · -/= glow · space freeze
+
+The control panel groups everything into collapsible sections: TEMPLATES, SOURCE, LOOK,
+MOTION (flocking) and SIGNAL (glitch + dithering). Click a header to open it.
 """
 from __future__ import annotations
 
@@ -44,6 +50,10 @@ def main():
     ap.add_argument("--particles", type=int, default=200000,
                     help="max particles allocated; the Count slider scales how many render")
     ap.add_argument("--list-cameras", action="store_true")
+    ap.add_argument("--flock", action="store_true",
+                    help="start with boids steering on the particle cloud (MOTION panel)")
+    ap.add_argument("--glitch", action="store_true",
+                    help="start with the circuit-bent post-FX chain on (SIGNAL panel)")
     ap.add_argument("--no-mirror", action="store_true")
     args = ap.parse_args()
 
@@ -66,7 +76,8 @@ def main():
     else:
         live_flow(device=device, matte=args.matte, res=parse_wh(args.res),
                   grid=parse_wh(args.grid), n=args.particles, preset=args.preset or "abstract",
-                  audio=args.audio, panel=(args.ui == "panel"), mirror=not args.no_mirror)
+                  audio=args.audio, panel=(args.ui == "panel"), mirror=not args.no_mirror,
+                  flock=args.flock, glitch=args.glitch)
 
 
 if __name__ == "__main__":

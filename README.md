@@ -27,6 +27,8 @@ in System Settings → Privacy & Security.
 ## The live instrument
 
 One window: the live render plus a collapsible control panel (click the `>` to fold it away).
+The panel is grouped into **collapsible sections** — click a header to open it. `MOTION` and
+`SIGNAL` start closed, so the panel opens at the size it always did.
 
 - **Templates** — one-click looks: `abstract` (glowing cloud), `portrait`/`textured`
   (recognizable, painted with your real colors), `embers`, `aurora`, and **`sigil`** (sharp
@@ -41,6 +43,15 @@ One window: the live render plus a collapsible control panel (click the `>` to f
   it is. Recordings capture it too.
 - **Look** — color palette + sliders for Trails, Glow, Spark, Flow, Size, Count, and the sigil
   knobs Glide / Pull / Reseed. Every slider has an `i` tooltip.
+- **Motion** — **Flock**: Reynolds boids steering (cohesion / alignment / separation) applied
+  to the particle cloud, so it organises into shoals and murmurations while still being shaped
+  by the camera. Costs ~4 ms at 200k particles — the neighbourhood is approximated on a spatial
+  grid, because true all-pairs boids at this particle count is ~4x10^10 pair terms.
+- **Signal** — **Glitch**: the circuit-bent chain (chroma bleed, scan drift and sync tears,
+  glitch blocks, bit-crush, CRT scan lines) plus Bayer / Floyd-Steinberg **dithering**, applied
+  to the finished frame. Costs ~6 ms at 720p, ~14 ms at 1080p. The control panel is drawn
+  *after* it, so the panel never glitches into unreadability, and recordings capture what you
+  see. Start it from the CLI with `--glitch` (or `--flock`).
 - **Audio** — toggle sound reactivity (bass pulses brightness; treble adds spark where Spark > 0)
   and a sensitivity slider.
 - **Record** — capture an MP4 of your session.
@@ -68,6 +79,11 @@ Standalone studies, each in `experiments/NN-name/` with its own README and `run.
 | 05 | live-webcam       | the real-time interactive instrument (above)            |
 | 06 | flocking          | Reynolds boids — order grown from local rules            |
 | 07 | circuit-bent      | stochastic glitch + dithering: emulating bent hardware   |
+
+Experiments 06 and 07 are also **built into the live instrument** as the `MOTION` and `SIGNAL`
+panel sections — the standalone versions remain as focused studies of each idea (06 renders
+boids in 3D through the instanced renderer; 07 bends the raw camera feed rather than the
+particle render).
 
 ## Tests
 

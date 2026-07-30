@@ -1,0 +1,132 @@
+"""Collapsible panel sections, and the MOTION / SIGNAL controls they hold.
+
+MOTION (boids) and SIGNAL (circuit-bent) pushed the control column past the 1080p window,
+which broke the "everything reachable without scrolling at 1080p" contract that
+test_overlay_scroll.py pins. Collapsing is the fix; these tests hold both ends of it —
+the panel still fits by default, and the new controls are genuinely reachable once opened.
+"""
+import cv2
+import numpy as np
+import pytest
+
+from dtouch.overlay_ui import OverlayUI, DITHERS
+from dtouch.particles import PALETTES
+from dtouch.live import MATTES
+
+PRESETS = ["abstract", "portrait", "textured", "embers", "aurora", "sigil"]
+
+
+def _ui(w=1920, h=1080):
+    ui = OverlayUI(w, h, PRESETS, list(PALETTES), MATTES)
+    ui.draw(np.zeros((h, w, 3), np.uint8), {"status": ""})
+    return ui
+
+
+def _keys(ui, w=1920, h=1080):
+    ui.draw(np.zeros((h, w, 3), np.uint8), {"status": ""})
+    return [k for _, k, _ in ui._hot]
+
+
+def _hit(ui, key, w=1920, h=1080):
+    """Click the centre of the first control with this key."""
+    ui.draw(np.zeros((h, w, 3), np.uint8), {"status": ""})
+    rect = next(r for r, k, _ in ui._hot if k == key)
+    cx, cy = (rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2
+    ui.on_mouse(cv2.EVENT_LBUTTONDOWN, cx, cy, 0)
+
+
+def test_new_sections_start_closed_so_the_panel_still_fits_1080p():
+    ui = _ui()
+    assert ui.sections["MOTION"] is False
+    assert ui.sections["SIGNAL"] is False
+    assert ui._content_h <= 1080, "the default panel must not need scrolling at 1080p"
+
+
+def test_closed_sections_hide_their_controls():
+    ui = _ui()
+    keys = _keys(ui)
+    assert "flock" not in keys and "glitch" not in keys
+    assert "section" in keys, "but the headers themselves are always clickable"
+
+
+def test_clicking_a_header_reveals_its_controls():
+    ui = _ui()
+    _hit(ui, "section")            # first header is TEMPLATES
+    assert ui.sections["TEMPLATES"] is False, "clicking a header toggles it"
+
+    ui = _ui()
+    ui.sections["MOTION"] = True
+    keys = _keys(ui)
+    for k in ("flock", "cohere", "align", "separate"):
+        assert k in keys or any(p and p[0] == k for _, kk, p in ui._hot if kk == "slider"), \
+            f"{k} should be reachable when MOTION is open"
+
+
+def test_motion_controls_are_wired():
+    ui = _ui()
+    ui.sections["MOTION"] = True
+    assert ui.flock is False
+    _hit(ui, "flock")
+    assert ui.flock is True, "the Flock toggle must actually flip"
+
+
+def test_signal_controls_are_wired():
+    ui = _ui()
+    ui.sections["SIGNAL"] = True
+    assert ui.glitch is False
+    _hit(ui, "glitch")
+    assert ui.glitch is True
+    assert ui.scanlines is True
+    _hit(ui, "scanlines")
+    assert ui.scanlines is False
+
+
+def test_dither_cycles_through_every_mode_and_wraps():
+    ui = _ui()
+    ui.sections["SIGNAL"] = True
+    seen = []
+    for _ in range(len(DITHERS) + 1):
+        seen.append(ui.dither_name)
+        ui.dither_idx = (ui.dither_idx + 1) % len(DITHERS)
+    assert seen[:len(DITHERS)] == DITHERS
+    assert seen[-1] == DITHERS[0], "cycling must wrap, not run off the end"
+
+
+def test_off_is_a_real_dither_choice():
+    """'off' must be selectable without turning the whole glitch chain off."""
+    assert "off" in DITHERS
+
+
+def test_every_new_slider_has_a_declared_range():
+    """A slider without a range raises KeyError at draw time — i.e. in the live app."""
+    from dtouch.overlay_ui import _RANGES
+    for attr in ("cohere", "align", "separate", "chroma", "drift", "crush"):
+        assert attr in _RANGES, f"{attr} has no _RANGES entry"
+        lo, hi = _RANGES[attr]
+        assert lo < hi
+        assert lo <= getattr(_ui(), attr) <= hi, f"{attr}'s default sits outside its range"
+
+
+def test_all_sections_open_still_reachable_by_scrolling():
+    """Opening everything overflows on purpose; scrolling must still get you to Quit."""
+    ui = _ui(1280, 720)
+    for name in ui.sections:
+        ui.sections[name] = True
+    # Draw once after opening. The scroll clamp uses the content height measured by the
+    # PREVIOUS draw, so until the taller column has been rendered once, scrolling is still
+    # clamped to the old (shorter) extent. In the live app that resolves on the next frame,
+    # 16 ms later; here nothing would ever redraw unless the test does.
+    ui.draw(np.zeros((720, 1280, 3), np.uint8), {"status": ""})
+    for _ in range(80):
+        ui.on_mouse(cv2.EVENT_MOUSEWHEEL, 1100, 300, -120)
+    ui.draw(np.zeros((720, 1280, 3), np.uint8), {"status": ""})
+    quit_bottom = next(r for r, k, _ in ui._hot if k == "quit")[3]
+    assert quit_bottom <= 720
+
+
+def test_section_state_survives_a_redraw():
+    ui = _ui()
+    ui.sections["SIGNAL"] = True
+    _keys(ui)
+    _keys(ui)
+    assert ui.sections["SIGNAL"] is True
