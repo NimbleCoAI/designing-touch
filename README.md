@@ -66,6 +66,8 @@ Standalone studies, each in `experiments/NN-name/` with its own README and `run.
 | 03 | audio-reactive    | sound → displacement                                     |
 | 04 | fluid             | stable-fluids advection of a particle field             |
 | 05 | live-webcam       | the real-time interactive instrument (above)            |
+| 06 | flocking          | Reynolds boids — order grown from local rules            |
+| 07 | circuit-bent      | stochastic glitch + dithering: emulating bent hardware   |
 
 ## Tests
 
